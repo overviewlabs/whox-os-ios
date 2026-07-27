@@ -32,8 +32,13 @@ struct SettingsView: View {
                 TextField("One-time pairing code", text: $pairingCode)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
-                Button("Pair this iPhone") {}
-                    .disabled(pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button(model.connection == .connecting ? "Pairing…" : "Pair this iPhone") {
+                    Task { await model.pair(with: pairingCode) }
+                }
+                .disabled(
+                    pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || model.connection == .connecting
+                )
                 Text("Generate the one-time code from your WHOX OS server. The private server key never leaves the server.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -41,7 +46,7 @@ struct SettingsView: View {
 
             Section("Relay") {
                 LabeledContent("Endpoint", value: "mobile-api.whox.ai")
-                LabeledContent("Status", value: model.connection == .unpaired ? "Not paired" : "Connected")
+                LabeledContent("Status", value: relayStatus)
             }
 
             Section("About") {
@@ -53,5 +58,18 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(WHOXTheme.background)
         .navigationTitle("Settings")
+    }
+
+    private var relayStatus: String {
+        switch model.connection {
+        case .unpaired:
+            "Not paired"
+        case .connecting:
+            "Pairing"
+        case .connected:
+            "Connected"
+        case .failed:
+            "Connection failed"
+        }
     }
 }

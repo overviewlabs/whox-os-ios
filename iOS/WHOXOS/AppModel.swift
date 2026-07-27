@@ -1,14 +1,15 @@
 import Foundation
 import Observation
+import WHOXCore
 
 @MainActor
 @Observable
 final class AppModel {
-    enum ConnectionState {
+    enum Connection: Equatable {
         case unpaired
-        case pairing
-        case connected
-        case disconnected
+        case connecting
+        case connected(serverName: String)
+        case failed(message: String)
     }
 
     enum AuthenticationState: Equatable {
@@ -17,15 +18,21 @@ final class AppModel {
         case signedIn(AuthenticatedUser)
     }
 
-    var connection: ConnectionState = .unpaired
+    var connection: Connection = .unpaired
+    var sessions: [WHOXSession] = []
+    var selectedSessionID: String?
+    var activeRunID: String?
+    var pendingApproval: RunEvent?
+
     var authenticationState: AuthenticationState = .checking
     var isAuthenticating = false
     var authenticationError: String?
-    var selectedChannel = "Home"
-    var draft = ""
-    var messages: [ChatMessage] = []
 
     private let authenticationService = AuthenticationService()
+
+    var selectedSession: WHOXSession? {
+        sessions.first { $0.id == selectedSessionID }
+    }
 
     var authenticatedUser: AuthenticatedUser? {
         guard case let .signedIn(user) = authenticationState else { return nil }
@@ -34,18 +41,21 @@ final class AppModel {
 
     func restoreAuthenticationIfNeeded() async {
         guard authenticationState == .checking else { return }
+
         do {
             if let session = try await authenticationService.restoreSession() {
                 authenticationState = .signedIn(session.user)
             } else {
                 authenticationState = .signedOut
             }
+        } catch let error as AuthenticationError {
+            authenticationState = .signedOut
+            if error != .sessionExpired {
+                authenticationError = error.localizedDescription
+            }
         } catch {
             authenticationState = .signedOut
-            if let authenticationError = error as? AuthenticationError,
-               authenticationError != .sessionExpired {
-                self.authenticationError = authenticationError.localizedDescription
-            }
+            authenticationError = AuthenticationError.unavailable.localizedDescription
         }
     }
 
@@ -66,26 +76,21 @@ final class AppModel {
 
     func signOut() async {
         await authenticationService.signOut()
-        connection = .unpaired
-        authenticationError = nil
         authenticationState = .signedOut
+        authenticationError = nil
+        connection = .unpaired
     }
 
-    func sendDraft() {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        messages.append(.init(role: .user, text: trimmed))
-        draft = ""
-    }
-}
-
-struct ChatMessage: Identifiable, Equatable {
-    enum Role {
-        case user
-        case assistant
+    func pair(with code: String) async {
+        guard connection != .connecting else { return }
+        connection = .connecting
+        try? await Task.sleep(for: .milliseconds(500))
+        connection = code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? .failed(message: "Enter a pairing code.")
+            : .connected(serverName: "WHOX Relay")
     }
 
-    let id = UUID()
-    let role: Role
-    let text: String
+    func disconnect() async {
+        connection = .unpaired
+    }
 }
