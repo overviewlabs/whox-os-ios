@@ -22,3 +22,31 @@ import Testing
 
     #expect(events == [ServerSentEvent(event: nil, data: "first\nsecond")])
 }
+
+@Test func preservesUTF8ScalarsSplitAcrossFeeds() throws {
+    var decoder = SSEDecoder()
+    var events: [ServerSentEvent] = []
+    for byte in Data("data: {\"delta\":\"🙂\"}\n\n".utf8) {
+        events += try decoder.feed(Data([byte]))
+    }
+    #expect(events == [ServerSentEvent(event: nil, data: "{\"delta\":\"🙂\"}")])
+}
+
+@Test func waitsForCompleteCRLFBoundary() throws {
+    var decoder = SSEDecoder()
+    #expect(try decoder.feed(Data("data: first\r".utf8)).isEmpty)
+    #expect(try decoder.feed(Data("\n\r".utf8)) == [ServerSentEvent(event: nil, data: "first")])
+    #expect(try decoder.feed(Data("\n".utf8)).isEmpty)
+}
+
+@Test func acceptsMixedSSELineEndings() throws {
+    var decoder = SSEDecoder()
+    #expect(try decoder.feed(Data("data: one\n\r\n".utf8)) == [ServerSentEvent(event: nil, data: "one")])
+    #expect(try decoder.feed(Data("data: two\r\n\r".utf8)) == [ServerSentEvent(event: nil, data: "two")])
+}
+
+@Test func emitsSessionAndDeltaFromTheSameFrame() throws {
+    var parser = ChatSSEParser()
+    let events = try parser.feed(Data("data: {\"session_id\":\"s1\",\"delta\":\"Hello\"}\n\n".utf8))
+    #expect(events == [.session("s1"), .delta("Hello")])
+}

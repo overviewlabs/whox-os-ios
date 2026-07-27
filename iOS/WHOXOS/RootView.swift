@@ -1,11 +1,6 @@
 import SwiftUI
 
-enum AppDestination: Hashable {
-    case chat
-    case activity
-    case control
-    case settings
-}
+enum AppDestination: Hashable { case chat, library, projects, scheduled, plugins, remote, images, health, settings }
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
@@ -15,93 +10,56 @@ struct RootView: View {
     var body: some View {
         Group {
             switch model.authenticationState {
-            case .checking:
-                loadingView
-            case .signedOut:
-                LoginView()
-            case .signedIn:
-                authenticatedContent
+            case .checking: ZStack { WHOXTheme.background.ignoresSafeArea(); ProgressView() }
+            case .signedOut: LoginView()
+            case .signedIn: authenticatedContent
             }
         }
-        .task {
-            await model.restoreAuthenticationIfNeeded()
-        }
-    }
-
-    private var loadingView: some View {
-        ZStack {
-            WHOXTheme.background.ignoresSafeArea()
-            ProgressView()
-                .tint(WHOXTheme.primaryText)
-        }
+        .task { await model.restoreAuthenticationIfNeeded() }
     }
 
     private var authenticatedContent: some View {
-        GeometryReader { geometry in
-            let drawerWidth = geometry.size.width * 0.74
-
+        GeometryReader { proxy in
+            let width = min(proxy.size.width * 0.78, 360)
             ZStack(alignment: .leading) {
-                WHOXTheme.background.ignoresSafeArea()
-
                 mainContent
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .background(WHOXTheme.background)
-                    .offset(x: isDrawerOpen ? drawerWidth : 0)
-                    .allowsHitTesting(!isDrawerOpen)
-
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityHidden(isDrawerOpen)
                 if isDrawerOpen {
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 30,
-                        bottomLeadingRadius: 30,
-                        style: .continuous
-                    )
-                    .fill(WHOXTheme.drawerOverlay)
-                    .frame(width: geometry.size.width)
-                    .offset(x: drawerWidth)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                }
-
-                NavigationDrawer(onSelect: select)
-                    .frame(width: drawerWidth)
-                    .offset(x: isDrawerOpen ? 0 : -drawerWidth)
-
-                if isDrawerOpen {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .frame(width: geometry.size.width - drawerWidth)
-                        .offset(x: drawerWidth)
-                        .onTapGesture(perform: closeDrawer)
+                    Color.black.opacity(0.28).ignoresSafeArea().onTapGesture { closeDrawer() }.transition(.opacity)
+                    NavigationDrawer(onSelect: select)
+                        .frame(width: width).transition(.move(edge: .leading))
+                        .shadow(color: .black.opacity(0.18), radius: 18, x: 8)
                 }
             }
-            .animation(.snappy(duration: 0.3), value: isDrawerOpen)
+            .animation(.snappy(duration: 0.28), value: isDrawerOpen)
         }
     }
 
-    @ViewBuilder
-    private var mainContent: some View {
+    @ViewBuilder private var mainContent: some View {
         switch destination {
-        case .chat:
-            ChatHomeView(onOpenDrawer: openDrawer)
-        case .activity:
-            NavigationStack { ActivityView() }
-        case .control:
-            NavigationStack { ControlCenterView() }
-        case .settings:
-            NavigationStack { SettingsView() }
+        case .chat: ChatHomeView(onOpenDrawer: openDrawer)
+        case .library: FeatureNavigation(title: "Library", openDrawer: openDrawer) { LibraryView() }
+        case .projects: FeatureNavigation(title: "Projects", openDrawer: openDrawer) { ProjectsView() }
+        case .scheduled: FeatureNavigation(title: "Scheduled", openDrawer: openDrawer) { ScheduledView() }
+        case .plugins: FeatureNavigation(title: "Plugins", openDrawer: openDrawer) { PluginsView() }
+        case .remote: FeatureNavigation(title: "Remote", openDrawer: openDrawer) { RemoteView() }
+        case .images: FeatureNavigation(title: "Images", openDrawer: openDrawer) { ImagesView { select(.chat) } }
+        case .health: FeatureNavigation(title: "Health", openDrawer: openDrawer) { HealthView() }
+        case .settings: NavigationStack { SettingsView().toolbar { drawerToolbar } }
         }
     }
 
-    private func openDrawer() {
-        isDrawerOpen = true
+    @ToolbarContentBuilder private var drawerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) { Button(action: openDrawer) { Image(systemName: "line.3.horizontal") }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Open navigation") }
     }
+    private func openDrawer() { isDrawerOpen = true }
+    private func closeDrawer() { isDrawerOpen = false }
+    private func select(_ value: AppDestination) { destination = value; closeDrawer() }
+}
 
-    private func closeDrawer() {
-        isDrawerOpen = false
-    }
-
-    private func select(_ newDestination: AppDestination) {
-        destination = newDestination
-        closeDrawer()
-    }
+private struct FeatureNavigation<Content: View>: View {
+    let title: String; let openDrawer: () -> Void; let content: Content
+    init(title: String, openDrawer: @escaping () -> Void, @ViewBuilder content: () -> Content) { self.title = title; self.openDrawer = openDrawer; self.content = content() }
+    var body: some View { NavigationStack { content.navigationTitle(title).toolbar { ToolbarItem(placement: .topBarLeading) { Button(action: openDrawer) { Image(systemName: "line.3.horizontal") }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Open navigation") } } } }
 }

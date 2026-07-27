@@ -6,7 +6,7 @@ struct ActivityView: View {
     var body: some View {
         List {
             Section("Agent") {
-                statusRow("Connection", value: model.connection == .unpaired ? "Not paired" : "Connected", icon: "network")
+                statusRow("Connection", value: model.connection == .unpaired ? "Disconnected" : "Connected", icon: "network")
                 statusRow("Active run", value: model.activeRunID == nil ? "None" : "Running", icon: "bolt.horizontal.circle")
                 statusRow("Approval", value: model.pendingApproval == nil ? "None pending" : "Action required", icon: "checkmark.shield")
             }

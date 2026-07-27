@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @State private var pairingCode = ""
 
     var body: some View {
         Form {
@@ -28,25 +27,13 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Pair WHOX OS") {
-                TextField("One-time pairing code", text: $pairingCode)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                Button(model.connection == .connecting ? "Pairing…" : "Pair this iPhone") {
-                    Task { await model.pair(with: pairingCode) }
-                }
-                .disabled(
-                    pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || model.connection == .connecting
-                )
-                Text("Generate the one-time code from your WHOX OS server. The private server key never leaves the server.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Relay") {
                 LabeledContent("Endpoint", value: "mobile-api.whox.ai")
                 LabeledContent("Status", value: relayStatus)
+                Button("Refresh connection") { Task { await model.refreshSessions() } }
+                Text("Your rotating refresh token stays in the device-only Keychain. Server credentials are never stored in the app.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section("About") {
@@ -63,9 +50,9 @@ struct SettingsView: View {
     private var relayStatus: String {
         switch model.connection {
         case .unpaired:
-            "Not paired"
+            "Disconnected"
         case .connecting:
-            "Pairing"
+            "Connecting"
         case .connected:
             "Connected"
         case .failed:

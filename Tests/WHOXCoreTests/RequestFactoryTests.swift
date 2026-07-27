@@ -14,7 +14,7 @@ import Testing
     let request = try factory.listSessions(limit: 25, offset: 50)
 
     #expect(request.httpMethod == "GET")
-    #expect(request.url?.absoluteString == "https://mobile-api.whox.ai/api/sessions?limit=25&offset=50")
+    #expect(request.url?.absoluteString == "https://mobile-api.whox.ai/v1/sessions?limit=25&offset=50")
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer mobile-access-token")
     #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
 }

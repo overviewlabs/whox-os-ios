@@ -1,140 +1,138 @@
 import SwiftUI
+import WHOXCore
 
 struct ChatHomeView: View {
     @Environment(AppModel.self) private var model
     let onOpenDrawer: () -> Void
-
     @State private var draft = ""
+    @FocusState private var composerFocused: Bool
 
     var body: some View {
         ZStack {
             WHOXTheme.background.ignoresSafeArea()
-
             VStack(spacing: 0) {
                 topBar
-                Spacer(minLength: 0)
-                quickActions
-                composer
+                if model.messages.isEmpty { emptyState } else { transcript }
+                if let error = model.errorMessage { Text(error).font(.footnote).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 6) }
+                composer.padding(.bottom, 8)
             }
-            .padding(.top, -7)
-            .padding(.bottom, 16)
         }
     }
 
     private var topBar: some View {
         HStack {
-            chromeButton(action: onOpenDrawer, label: "Open navigation") {
-                VStack(alignment: .leading, spacing: 5) {
-                    Capsule().frame(width: 17, height: 2)
-                    Capsule().frame(width: 11, height: 2)
-                }
-            }
-
+            circleButton("line.3.horizontal", label: "Open navigation", action: onOpenDrawer)
             Spacer()
-
-            chromeButton(action: {}, label: "Voice mode") {
-                Image(systemName: "waveform")
-                    .font(.system(size: 16, weight: .medium))
-            }
-        }
-        .padding(.horizontal, 18)
+            Text(model.selectedSession?.title ?? "WHOX OS").font(.headline).lineLimit(1).padding(.horizontal, 8)
+            Spacer()
+            circleButton("square.and.pencil", label: "New chat") { model.newChat() }
+        }.padding(.horizontal, 14).padding(.vertical, 6)
     }
 
-    private var quickActions: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            quickAction("Create an image", systemImage: "photo")
-            quickAction("Write or edit", systemImage: "pencil")
-            quickAction("Look something up", systemImage: "globe")
+    private var emptyState: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            Image("WHOXStudioLogo").resizable().scaledToFit().frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 12))
+            Text("How can I help?").font(.title2.bold()).padding(.top, 14)
+            Spacer()
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 9) {
+                    suggestion("Create an image", "photo")
+                    suggestion("Write or edit", "pencil")
+                    suggestion("Look something up", "globe")
+                }.padding(.horizontal, 16)
+            }.padding(.bottom, 12)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 23)
-        .padding(.bottom, 28)
+    }
+
+    private var transcript: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    ForEach(model.messages) { message in MessageRow(message: message).id(message.id) }
+                    if model.isSending { ProgressView().controlSize(.small).padding(.horizontal, 20).accessibilityLabel("WHOX OS is responding") }
+                }.padding(.vertical, 14)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: model.messages.last?.content) { _, _ in if let id = model.messages.last?.id { withAnimation { proxy.scrollTo(id, anchor: .bottom) } } }
+        }
     }
 
     private var composer: some View {
-        HStack(spacing: 14) {
-            Button(action: {}) {
-                Image(systemName: "plus")
-                    .font(.system(size: 21, weight: .regular))
-                    .foregroundStyle(WHOXTheme.primaryText)
+        HStack(alignment: .bottom, spacing: 8) {
+            Menu {
+                Button("New chat", systemImage: "square.and.pencil") {
+                    model.newChat(); draft = ""; composerFocused = true
+                }
+                Button("Create an image", systemImage: "photo.badge.plus") {
+                    draft = "Create an image: "; composerFocused = true
+                }
+                Button("Write or edit", systemImage: "pencil.line") {
+                    draft = "Help me write or edit: "; composerFocused = true
+                }
+                Button("Look something up", systemImage: "magnifyingglass") {
+                    draft = "Look up and explain: "; composerFocused = true
+                }
+            } label: {
+                Image(systemName: "plus").font(.title3).frame(width: 36, height: 36)
             }
-            .accessibilityLabel("Add attachment")
+            .accessibilityLabel("Prompt actions")
 
             TextField("Ask WHOX OS", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .font(.system(size: 16))
-                .foregroundStyle(WHOXTheme.primaryText)
-                .tint(WHOXTheme.primaryText)
+                .lineLimit(1...6).focused($composerFocused).padding(.vertical, 9)
 
-            if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button(action: send) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(WHOXTheme.inverseText)
-                        .frame(width: 32, height: 32)
-                        .background(WHOXTheme.primaryText, in: Circle())
+            if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.isSending {
+                Button { composerFocused = true } label: {
+                    Image(systemName: "mic.fill").frame(width: 36, height: 36)
                 }
-                .accessibilityLabel("Send")
+                .accessibilityLabel("Voice input")
+                .accessibilityHint("Focuses the composer so you can use iPhone dictation")
             } else {
-                Image(systemName: "mic")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(WHOXTheme.primaryText)
-
-                Button(action: {}) {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(WHOXTheme.inverseText)
-                        .frame(width: 32, height: 32)
-                        .background(WHOXTheme.primaryText, in: Circle())
+                Button(action: submitOrStop) {
+                    Image(systemName: model.isSending ? "stop.fill" : "arrow.up")
+                        .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 36, height: 36).background(Color.accentColor, in: Circle())
                 }
-                .accessibilityLabel("Start voice mode")
+                .disabled(!model.isSending && !canSend)
+                .accessibilityLabel(model.isSending ? "Stop response" : "Send message")
             }
         }
-        .frame(minHeight: 44)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(WHOXTheme.surface)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(WHOXTheme.border, lineWidth: 1)
-                }
-        )
-        .padding(.horizontal, 30)
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 25).stroke(WHOXTheme.border, lineWidth: 0.7) }
+        .padding(.horizontal, 12)
     }
 
-    private func quickAction(_ title: String, systemImage: String) -> some View {
-        Button(action: {}) {
-            HStack(spacing: 17) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 16, weight: .regular))
-                    .frame(width: 22)
-                Text(title)
-                    .font(.system(size: 15, weight: .regular))
-            }
-            .foregroundStyle(WHOXTheme.primaryText)
-        }
-    }
-
-    private func chromeButton<Label: View>(
-        action: @escaping () -> Void,
-        label: String,
-        @ViewBuilder content: () -> Label
-    ) -> some View {
-        Button(action: action) {
-            content()
-                .foregroundStyle(WHOXTheme.primaryText)
-                .frame(width: 44, height: 44)
-                .background(WHOXTheme.surface, in: Circle())
-                .overlay {
-                    Circle().stroke(WHOXTheme.border, lineWidth: 1)
-                }
-        }
-        .accessibilityLabel(label)
-    }
-
-    private func send() {
-        guard model.connection != .connecting else { return }
+    private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private func submitOrStop() {
+        if model.isSending { model.stopSending(); return }
+        guard canSend else { return }
+        let value = draft
         draft = ""
+        model.submit(value)
     }
+    private func suggestion(_ text: String, _ icon: String) -> some View { Button { draft = text + ": "; composerFocused = true } label: { Label(text, systemImage: icon).font(.subheadline).foregroundStyle(.primary).padding(.horizontal, 14).frame(minHeight: 44).background(WHOXTheme.surface, in: Capsule()).overlay { Capsule().stroke(WHOXTheme.border) } } }
+    private func circleButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View { Button(action: action) { Image(systemName: icon).frame(width: 44, height: 44).background(WHOXTheme.surface, in: Circle()).overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) } }.accessibilityLabel(label) }
+}
+
+private struct MessageRow: View {
+    let message: ChatMessage
+    var body: some View {
+        HStack {
+            if message.role == .user { Spacer(minLength: 54) }
+            VStack(alignment: .leading, spacing: 10) {
+                markdown
+                if let calls = message.toolCalls, !calls.isEmpty {
+                    ForEach(Array(calls.enumerated()), id: \.offset) { _, call in
+                        DisclosureGroup { Text(call.result?.displayString ?? call.arguments?.displayString ?? "").font(.caption.monospaced()).textSelection(.enabled) } label: { Label(call.name ?? "Tool", systemImage: call.status == "completed" ? "checkmark.circle" : "wrench.and.screwdriver").font(.caption.weight(.medium)) }
+                    }
+                }
+                if let reasoning = message.reasoning, !reasoning.isEmpty { DisclosureGroup("Reasoning") { Text(reasoning).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled) }.font(.caption) }
+            }
+            .padding(message.role == .user ? 12 : 0)
+            .background(message.role == .user ? WHOXTheme.surface : Color.clear, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            if message.role != .user { Spacer(minLength: 0) }
+        }.padding(.horizontal, 16)
+    }
+    private var markdown: Text { (try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .full))) .map { Text($0) } ?? Text(message.content) }
 }

@@ -56,46 +56,87 @@ actor AuthenticationService {
     private let keychain = RefreshTokenStore()
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private struct RefreshOperation {
+        let id: UUID
+        let task: Task<AuthenticationSession, Error>
+    }
+
+    private var currentSession: AuthenticationSession?
+    private var refreshOperation: RefreshOperation?
+    private var authenticationGeneration = 0
 
     func signIn(email: String, password: String) async throws -> AuthenticationSession {
+        let generation = authenticationGeneration
         let payload = LoginRequest(
             email: email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
             password: password,
             deviceName: "WHOX OS for iPhone"
         )
         let session: AuthenticationSession = try await send(path: "login", body: payload)
+        guard generation == authenticationGeneration else { throw AuthenticationError.sessionExpired }
         try keychain.save(session.refreshToken)
+        currentSession = session
         return session
     }
 
     func restoreSession() async throws -> AuthenticationSession? {
-        guard let refreshToken = try keychain.read() else { return nil }
+        let generation = authenticationGeneration
+        guard try keychain.read() != nil else { return nil }
         do {
-            let session: AuthenticationSession = try await send(
-                path: "refresh",
-                body: RefreshRequest(refreshToken: refreshToken)
-            )
-            try keychain.save(session.refreshToken)
-            return session
+            return try await refreshSession()
         } catch {
-            try? keychain.delete()
+            if generation == authenticationGeneration { try? keychain.delete() }
             throw error
         }
     }
 
     func signOut() async {
-        let refreshToken: String?
-        do {
-            refreshToken = try keychain.read()
-        } catch {
-            return
-        }
-        defer { try? keychain.delete() }
+        authenticationGeneration += 1
+        refreshOperation?.task.cancel()
+        refreshOperation = nil
+        currentSession = nil
+        let refreshToken = try? keychain.read()
+        try? keychain.delete()
         guard let refreshToken else { return }
         let _: SignOutResponse? = try? await send(
             path: "logout",
             body: RefreshRequest(refreshToken: refreshToken)
         )
+    }
+
+    func accessToken(refresh: Bool = false) async throws -> String {
+        if !refresh, let currentSession { return currentSession.accessToken }
+        return try await refreshSession().accessToken
+    }
+
+    private func refreshSession() async throws -> AuthenticationSession {
+        if let refreshOperation { return try await refreshOperation.task.value }
+        let generation = authenticationGeneration
+        guard let refreshToken = try keychain.read() else { throw AuthenticationError.sessionExpired }
+        let id = UUID()
+        let task = Task<AuthenticationSession, Error> {
+            try await self.performRefresh(refreshToken: refreshToken, generation: generation)
+        }
+        refreshOperation = .init(id: id, task: task)
+        do {
+            let session = try await task.value
+            if refreshOperation?.id == id { refreshOperation = nil }
+            return session
+        } catch {
+            if refreshOperation?.id == id { refreshOperation = nil }
+            throw error
+        }
+    }
+
+    private func performRefresh(refreshToken: String, generation: Int) async throws -> AuthenticationSession {
+        let session: AuthenticationSession = try await send(
+            path: "refresh",
+            body: RefreshRequest(refreshToken: refreshToken)
+        )
+        guard generation == authenticationGeneration else { throw AuthenticationError.sessionExpired }
+        try keychain.save(session.refreshToken)
+        currentSession = session
+        return session
     }
 
     private func send<Request: Encodable, Response: Decodable>(
@@ -114,6 +155,8 @@ actor AuthenticationService {
         let response: URLResponse
         do {
             (data, response) = try await URLSession.shared.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw AuthenticationError.unavailable
         }
