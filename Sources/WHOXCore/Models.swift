@@ -87,6 +87,22 @@ public struct ToolCall: Codable, Sendable, Equatable {
     public let result: JSONValue?
 }
 
+public struct ChatAttachment: Codable, Identifiable, Sendable, Equatable {
+    public let id: String
+    public let name: String
+    public let mimeType: String
+    public let size: Int
+
+    public init(id: String, name: String, mimeType: String, size: Int) {
+        self.id = id
+        self.name = name
+        self.mimeType = mimeType
+        self.size = size
+    }
+
+    public var isImage: Bool { mimeType.hasPrefix("image/") }
+}
+
 public struct ChatMessage: Codable, Identifiable, Sendable, Equatable {
     public let id: String
     public let sessionID: String?
@@ -100,12 +116,14 @@ public struct ChatMessage: Codable, Identifiable, Sendable, Equatable {
     public let toolCallID: String?
     public let finishReason: String?
     public let tokenCount: Int?
-    public init(id: String, sessionID: String? = nil, role: MessageRole, content: String, timestamp: Double? = nil, reasoning: String? = nil, reasoningContent: String? = nil, toolCalls: [ToolCall]? = nil, toolName: String? = nil, toolCallID: String? = nil, finishReason: String? = nil, tokenCount: Int? = nil) {
+    public let attachments: [ChatAttachment]
+    public init(id: String, sessionID: String? = nil, role: MessageRole, content: String, timestamp: Double? = nil, reasoning: String? = nil, reasoningContent: String? = nil, toolCalls: [ToolCall]? = nil, toolName: String? = nil, toolCallID: String? = nil, finishReason: String? = nil, tokenCount: Int? = nil, attachments: [ChatAttachment] = []) {
         self.id = id; self.sessionID = sessionID; self.role = role; self.content = content; self.timestamp = timestamp
         self.reasoning = reasoning; self.reasoningContent = reasoningContent; self.toolCalls = toolCalls
         self.toolName = toolName; self.toolCallID = toolCallID; self.finishReason = finishReason; self.tokenCount = tokenCount
+        self.attachments = attachments
     }
-    private enum CodingKeys: String, CodingKey { case id, sessionID = "sessionId", role, content, timestamp, reasoning, reasoningContent, toolCalls, toolName, toolCallID, finishReason, tokenCount }
+    private enum CodingKeys: String, CodingKey { case id, sessionID = "sessionId", role, content, timestamp, reasoning, reasoningContent, toolCalls, toolName, toolCallID, finishReason, tokenCount, attachments }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let value = try? c.decode(String.self, forKey: .id) { id = value }
@@ -121,6 +139,7 @@ public struct ChatMessage: Codable, Identifiable, Sendable, Equatable {
         toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
         finishReason = try c.decodeIfPresent(String.self, forKey: .finishReason)
         tokenCount = try c.decodeIfPresent(Int.self, forKey: .tokenCount)
+        attachments = try c.decodeIfPresent([ChatAttachment].self, forKey: .attachments) ?? []
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -128,6 +147,7 @@ public struct ChatMessage: Codable, Identifiable, Sendable, Equatable {
         try c.encodeIfPresent(timestamp, forKey: .timestamp); try c.encodeIfPresent(reasoning, forKey: .reasoning); try c.encodeIfPresent(reasoningContent, forKey: .reasoningContent)
         try c.encodeIfPresent(toolCalls, forKey: .toolCalls); try c.encodeIfPresent(toolName, forKey: .toolName); try c.encodeIfPresent(toolCallID, forKey: .toolCallID)
         try c.encodeIfPresent(finishReason, forKey: .finishReason); try c.encodeIfPresent(tokenCount, forKey: .tokenCount)
+        if !attachments.isEmpty { try c.encode(attachments, forKey: .attachments) }
     }
 }
 

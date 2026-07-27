@@ -264,15 +264,97 @@ private struct MessageRow: View {
     var body: some View {
         HStack(alignment: .top) {
             if message.role == .user { Spacer(minLength: 54) }
-            StructuredChatText(content: message.content)
-                .padding(message.role == .user ? 12 : 0)
-                .background(
-                    message.role == .user ? WHOXTheme.surface : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
+            VStack(alignment: .leading, spacing: 10) {
+                if !message.content.isEmpty {
+                    StructuredChatText(content: message.content)
+                }
+                ForEach(message.attachments) { attachment in
+                    HistoryAttachmentCard(attachment: attachment)
+                }
+            }
+            .padding(message.role == .user ? 12 : 0)
+            .background(
+                message.role == .user ? WHOXTheme.surface : Color.clear,
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
             if message.role != .user { Spacer(minLength: 0) }
         }
         .padding(.horizontal, 16)
+    }
+}
+
+private struct HistoryAttachmentCard: View {
+    @Environment(AppModel.self) private var model
+    let attachment: ChatAttachment
+    @State private var imageData: Data?
+    @State private var didFail = false
+
+    var body: some View {
+        Group {
+            if attachment.isImage {
+                imageCard
+            } else {
+                fileCard
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Attachment \(attachment.name), \(formattedSize)")
+    }
+
+    private var imageCard: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Group {
+                if let imageData, let image = UIImage(data: imageData) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                } else if didFail {
+                    Image(systemName: "photo.badge.exclamationmark")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(maxWidth: 280, minHeight: 96, maxHeight: 260)
+            .frame(maxWidth: .infinity)
+            .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            HStack(spacing: 6) {
+                Image(systemName: "photo")
+                Text(attachment.name).lineLimit(1)
+                Spacer(minLength: 6)
+                Text(formattedSize).foregroundStyle(.secondary)
+            }
+            .font(.caption)
+        }
+        .task(id: attachment.id) {
+            imageData = await model.attachmentData(attachment)
+            didFail = imageData == nil
+        }
+    }
+
+    private var fileCard: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc.fill")
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 38, height: 38)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.name).font(.subheadline.weight(.medium)).lineLimit(2)
+                Text(formattedSize).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(9)
+        .frame(maxWidth: 280, alignment: .leading)
+        .background(WHOXTheme.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12).stroke(WHOXTheme.border, lineWidth: 0.7) }
+    }
+
+    private var formattedSize: String {
+        ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file)
     }
 }
 

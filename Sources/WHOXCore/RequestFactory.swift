@@ -37,6 +37,7 @@ public struct WHOXRequestFactory: Sendable {
         r.setValue(encodedFilename, forHTTPHeaderField: "X-WHOX-Filename")
         return r
     }
+    public func attachment(_ id: String) throws -> URLRequest { try request(path: "/v1/uploads/\(escaped(id))") }
     public func listJobs() throws -> URLRequest { try request(path: "/v1/jobs") }
     public func createJob(name: String, schedule: String, prompt: String) throws -> URLRequest { try jsonRequest(path: "/v1/jobs", method: "POST", object: ["name": name, "schedule": schedule, "prompt": prompt]) }
     public func deleteJob(_ id: String) throws -> URLRequest { try request(path: "/v1/jobs/\(escaped(id))", method: "DELETE") }

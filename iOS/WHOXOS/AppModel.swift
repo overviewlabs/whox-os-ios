@@ -59,6 +59,11 @@ final class AppModel {
     @ObservationIgnored private var chatOperationID: UUID?
     @ObservationIgnored private var sessionLoadID: UUID?
     @ObservationIgnored private var accountGeneration = 0
+    @ObservationIgnored private let attachmentCache: NSCache<NSString, NSData> = {
+        let cache = NSCache<NSString, NSData>()
+        cache.totalCostLimit = 50 * 1024 * 1024
+        return cache
+    }()
 
     init() {
         let authenticationService = AuthenticationService()
@@ -236,10 +241,22 @@ final class AppModel {
                 try Task.checkCancellation()
             }
             guard chatOperationID == operationID else { return }
+            let messageAttachments = attachments.map {
+                let id = $0.id.uuidString.lowercased()
+                if let userID = authenticatedUser?.id {
+                    let cacheKey = "\(userID.lowercased())|\(id)" as NSString
+                    attachmentCache.setObject($0.data as NSData, forKey: cacheKey, cost: $0.size)
+                }
+                return ChatAttachment(id: id, name: $0.name, mimeType: $0.mimeType, size: $0.size)
+            }
             clearPendingAttachments()
-            let attachmentSummary = attachments.map { "📎 \($0.name)" }.joined(separator: "\n")
-            let localContent = [text, attachmentSummary].filter { !$0.isEmpty }.joined(separator: "\n\n")
-            messages.append(ChatMessage(id: "local-user-\(UUID())", role: .user, content: localContent, timestamp: Date().timeIntervalSince1970))
+            messages.append(ChatMessage(
+                id: "local-user-\(UUID())",
+                role: .user,
+                content: text,
+                timestamp: Date().timeIntervalSince1970,
+                attachments: messageAttachments
+            ))
             let assistantID = "stream-\(UUID())"
             messages.append(ChatMessage(id: assistantID, role: .assistant, content: ""))
             guard let selectedSessionID else { throw GatewayError.invalidResponse }
@@ -432,7 +449,30 @@ final class AppModel {
         errorMessage = nil
         activeRunID = nil
         pendingApproval = nil
+        attachmentCache.removeAllObjects()
         clearPendingAttachments()
+    }
+
+    func attachmentData(_ attachment: ChatAttachment) async -> Data? {
+        let generation = accountGeneration
+        guard let userID = authenticatedUser?.id else { return nil }
+        let cacheKey = "\(userID.lowercased())|\(attachment.id.lowercased())" as NSString
+        if let cached = attachmentCache.object(forKey: cacheKey) {
+            return cached as Data
+        }
+        do {
+            let data = try await gateway.attachment(attachment.id)
+            guard
+                generation == accountGeneration,
+                authenticatedUser?.id == userID,
+                data.count == attachment.size,
+                data.count <= 20 * 1024 * 1024
+            else { return nil }
+            attachmentCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
+            return data
+        } catch {
+            return nil
+        }
     }
 
     private func clearPendingAttachments() { pendingAttachments = [] }

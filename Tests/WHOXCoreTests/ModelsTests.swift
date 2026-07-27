@@ -47,3 +47,34 @@ import Testing
     #expect(event.runID == "run_123")
     #expect(event.toolName == "terminal")
 }
+
+@Test func decodesPersistentChatAttachments() throws {
+    let json = #"""
+    {
+      "id": "message-1",
+      "role": "user",
+      "content": "Describe this image",
+      "attachments": [
+        {
+          "id": "00000000-0000-4000-8000-000000000021",
+          "name": "dock.jpg",
+          "mimeType": "image/jpeg",
+          "size": 2048
+        }
+      ]
+    }
+    """#.data(using: .utf8)!
+
+    let message = try JSONDecoder.whox.decode(ChatMessage.self, from: json)
+
+    #expect(message.attachments.count == 1)
+    #expect(message.attachments[0].name == "dock.jpg")
+    #expect(message.attachments[0].mimeType == "image/jpeg")
+    #expect(message.attachments[0].size == 2048)
+}
+
+@Test func missingChatAttachmentsDecodeAsEmpty() throws {
+    let json = #"{"id":"message-2","role":"assistant","content":"Done"}"#.data(using: .utf8)!
+    let message = try JSONDecoder.whox.decode(ChatMessage.self, from: json)
+    #expect(message.attachments.isEmpty)
+}

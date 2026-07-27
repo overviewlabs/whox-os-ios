@@ -92,3 +92,16 @@ import Testing
     #expect(request.url?.path == "/v1/sessions/ios-main/chat")
     #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
 }
+
+@Test func buildsAuthenticatedAttachmentDownloadRequest() throws {
+    let factory = WHOXRequestFactory(
+        baseURL: URL(string: "https://mobile-api.whox.ai")!,
+        accessToken: "mobile-access-token"
+    )
+
+    let request = try factory.attachment("00000000-0000-4000-8000-000000000021")
+
+    #expect(request.httpMethod == "GET")
+    #expect(request.url?.path == "/v1/uploads/00000000-0000-4000-8000-000000000021")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer mobile-access-token")
+}
