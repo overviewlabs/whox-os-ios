@@ -8,10 +8,35 @@ enum AppDestination: Hashable {
 }
 
 struct RootView: View {
+    @Environment(AppModel.self) private var model
     @State private var destination: AppDestination = .chat
     @State private var isDrawerOpen = false
 
     var body: some View {
+        Group {
+            switch model.authenticationState {
+            case .checking:
+                loadingView
+            case .signedOut:
+                LoginView()
+            case .signedIn:
+                authenticatedContent
+            }
+        }
+        .task {
+            await model.restoreAuthenticationIfNeeded()
+        }
+    }
+
+    private var loadingView: some View {
+        ZStack {
+            WHOXTheme.background.ignoresSafeArea()
+            ProgressView()
+                .tint(WHOXTheme.primaryText)
+        }
+    }
+
+    private var authenticatedContent: some View {
         GeometryReader { geometry in
             let drawerWidth = geometry.size.width * 0.74
 
@@ -38,8 +63,8 @@ struct RootView: View {
                 }
 
                 NavigationDrawer(onSelect: select)
-                .frame(width: drawerWidth)
-                .offset(x: isDrawerOpen ? 0 : -drawerWidth)
+                    .frame(width: drawerWidth)
+                    .offset(x: isDrawerOpen ? 0 : -drawerWidth)
 
                 if isDrawerOpen {
                     Color.clear

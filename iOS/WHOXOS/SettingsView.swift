@@ -1,4 +1,3 @@
-import AuthenticationServices
 import SwiftUI
 
 struct SettingsView: View {
@@ -8,11 +7,25 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Account") {
-                SignInWithAppleButton(.signIn, onRequest: { request in
-                    request.requestedScopes = [.fullName, .email]
-                }, onCompletion: { _ in })
-                .signInWithAppleButtonStyle(.white)
-                .frame(height: 48)
+                HStack(spacing: 12) {
+                    Image("WHOXStudioLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.authenticatedUser?.email ?? "WHOX member")
+                            .font(.body.weight(.medium))
+                        Text((model.authenticatedUser?.role ?? "member").capitalized)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Button("Sign Out", role: .destructive) {
+                    Task { await model.signOut() }
+                }
             }
 
             Section("Pair WHOX OS") {
