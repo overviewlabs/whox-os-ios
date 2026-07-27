@@ -1,0 +1,124 @@
+name: TestFlight Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Marketing version
+        required: true
+        default: 0.1.0
+        type: string
+      build_number:
+        description: App Store build number
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Verify portable core
+        run: swift test
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Install ephemeral signing assets
+        env:
+          P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$P12_BASE64"
+          test -n "$P12_PASSWORD"
+          test -n "$PROFILE_BASE64"
+          test -n "$KEYCHAIN_PASSWORD"
+
+          KEYCHAIN="$RUNNER_TEMP/ios-signing.keychain-db"
+          P12="$RUNNER_TEMP/distribution.p12"
+          PROFILE="$RUNNER_TEMP/appstore.mobileprovision"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$P12"
+          printf '%s' "$PROFILE_BASE64" | base64 --decode > "$PROFILE"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$P12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          UUID=$(security cms -D -i "$PROFILE" | plutil -extract UUID raw -)
+          INSTALLED_PROFILE="$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          cp "$PROFILE" "$INSTALLED_PROFILE"
+          printf 'SIGNING_KEYCHAIN=%s\n' "$KEYCHAIN" >> "$GITHUB_ENV"
+          printf 'INSTALLED_PROFILE=%s\n' "$INSTALLED_PROFILE" >> "$GITHUB_ENV"
+
+      - name: Archive
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project WHOXOS.xcodeproj \
+            -scheme WHOXOS \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/WHOXOS.xcarchive" \
+            MARKETING_VERSION='${{ inputs.version }}' \
+            CURRENT_PROJECT_VERSION='${{ inputs.build_number }}' \
+            clean archive
+
+      - name: Export signed IPA
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/WHOXOS.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist ci/ExportOptions.plist
+
+      - name: Validate signed IPA
+        run: |
+          set -euo pipefail
+          IPA=("$RUNNER_TEMP"/export/*.ipa)
+          test -f "${IPA[0]}"
+          mkdir "$RUNNER_TEMP/ipa-check"
+          ditto -x -k "${IPA[0]}" "$RUNNER_TEMP/ipa-check"
+          APP=("$RUNNER_TEMP"/ipa-check/Payload/*.app)
+          test "$(plutil -extract CFBundleIdentifier raw -o - "${APP[0]}/Info.plist")" = 'com.whox.whoxos'
+          test "$(plutil -extract CFBundleShortVersionString raw -o - "${APP[0]}/Info.plist")" = '${{ inputs.version }}'
+          test "$(plutil -extract CFBundleVersion raw -o - "${APP[0]}/Info.plist")" = '${{ inputs.build_number }}'
+          codesign --verify --deep --strict --verbose=2 "${APP[0]}"
+          security cms -D -i "${APP[0]}/embedded.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          test "$(plutil -extract Entitlements.application-identifier raw -o - "$RUNNER_TEMP/profile.plist")" = '8PN4T7SR2G.com.whox.whoxos'
+          printf 'Signed IPA validated: com.whox.whoxos %s (%s)\n' '${{ inputs.version }}' '${{ inputs.build_number }}'
+
+      - name: Upload signed IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whox-os-${{ inputs.version }}-${{ inputs.build_number }}
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          set +e
+          [[ -n "${INSTALLED_PROFILE:-}" ]] && rm -f "$INSTALLED_PROFILE"
+          [[ -n "${SIGNING_KEYCHAIN:-}" ]] && security delete-keychain "$SIGNING_KEYCHAIN"
