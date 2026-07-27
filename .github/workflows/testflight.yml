@@ -109,7 +109,7 @@ jobs:
           printf 'Signed IPA validated: com.whox.whoxos %s (%s)\n' '${{ inputs.version }}' '${{ inputs.build_number }}'
 
       - name: Upload signed IPA artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: whox-os-${{ inputs.version }}-${{ inputs.build_number }}
           path: ${{ runner.temp }}/export/*.ipa
