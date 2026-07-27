@@ -17,10 +17,23 @@ public struct WHOXRequestFactory: Sendable {
     public func updateSession(_ id: String, title: String) throws -> URLRequest { try jsonRequest(path: "/v1/sessions/\(escaped(id))", method: "PATCH", object: ["title": title]) }
     public func deleteSession(_ id: String) throws -> URLRequest { try request(path: "/v1/sessions/\(escaped(id))", method: "DELETE") }
     public func startRun(input: String, sessionID: String) throws -> URLRequest { try jsonRequest(path: "/v1/runs", method: "POST", object: ["input": input, "session_id": sessionID]) }
-    public func chat(sessionID: String, message: String, stream: Bool = true) throws -> URLRequest {
+    public func chat(sessionID: String, message: String, attachmentIDs: [String] = [], stream: Bool = true) throws -> URLRequest {
         let suffix = stream ? "/chat/stream" : "/chat"
-        var r = try jsonRequest(path: "/v1/sessions/\(escaped(sessionID))\(suffix)", method: "POST", object: ["message": message])
+        var object: [String: Any] = ["message": message]
+        if !attachmentIDs.isEmpty { object["attachment_ids"] = attachmentIDs }
+        var r = try jsonRequest(path: "/v1/sessions/\(escaped(sessionID))\(suffix)", method: "POST", object: object)
         if stream { r.setValue("text/event-stream", forHTTPHeaderField: "Accept") }
+        return r
+    }
+    public func upload(attachmentID: String, filename: String, mimeType: String, data: Data) throws -> URLRequest {
+        var r = try request(path: "/v1/uploads/\(escaped(attachmentID))", method: "PUT", body: data)
+        let filenameCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_.~"))
+        guard let encodedFilename = filename.addingPercentEncoding(withAllowedCharacters: filenameCharacters) else {
+            throw WHOXRequestError.invalidURL
+        }
+        r.timeoutInterval = 120
+        r.setValue(mimeType, forHTTPHeaderField: "Content-Type")
+        r.setValue(encodedFilename, forHTTPHeaderField: "X-WHOX-Filename")
         return r
     }
     public func listJobs() throws -> URLRequest { try request(path: "/v1/jobs") }
@@ -34,7 +47,7 @@ public struct WHOXRequestFactory: Sendable {
     public func health() throws -> URLRequest { try request(path: "/v1/health") }
 
     private func escaped(_ value: String) -> String { value.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_.~"))) ?? value }
-    private func jsonRequest(path: String, method: String, object: [String: String]) throws -> URLRequest { try request(path: path, method: method, body: JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) }
+    private func jsonRequest(path: String, method: String, object: Any) throws -> URLRequest { try request(path: path, method: method, body: JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) }
     private func request(path: String, method: String = "GET", queryItems: [URLQueryItem] = [], body: Data? = nil) throws -> URLRequest {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { throw WHOXRequestError.invalidURL }
         let root = components.percentEncodedPath.hasSuffix("/") ? String(components.percentEncodedPath.dropLast()) : components.percentEncodedPath

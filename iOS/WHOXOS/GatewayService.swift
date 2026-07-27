@@ -33,11 +33,26 @@ actor GatewayService {
     func models() async throws -> JSONValue { try await decode { try $0.models() } }
     func health() async throws -> JSONValue { try await decode { try $0.health() } }
 
-    func streamChat(sessionID: String, message: String, onEvent: @MainActor @escaping (ChatStreamEvent) -> Void) async throws {
+    func upload(_ attachment: PendingChatAttachment) async throws {
+        do {
+            _ = try await raw {
+                try $0.upload(
+                    attachmentID: attachment.id.uuidString.lowercased(),
+                    filename: attachment.name,
+                    mimeType: attachment.mimeType,
+                    data: attachment.data
+                )
+            }
+        } catch GatewayError.server(let code, _) where code == 409 {
+            // Retry a previously staged immutable attachment without overwriting it.
+        }
+    }
+
+    func streamChat(sessionID: String, message: String, attachmentIDs: [String] = [], onEvent: @MainActor @escaping (ChatStreamEvent) -> Void) async throws {
         for attempt in 0...1 {
             try Task.checkCancellation()
             let token = try await auth.accessToken(refresh: attempt == 1)
-            let request = try WHOXRequestFactory(baseURL: baseURL, accessToken: token).chat(sessionID: sessionID, message: message)
+            let request = try WHOXRequestFactory(baseURL: baseURL, accessToken: token).chat(sessionID: sessionID, message: message, attachmentIDs: attachmentIDs)
             let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse else { throw GatewayError.invalidResponse }
             if http.statusCode == 401 {
@@ -60,6 +75,7 @@ actor GatewayService {
     }
     private func raw(_ build: (WHOXRequestFactory) throws -> URLRequest) async throws -> Data {
         for attempt in 0...1 {
+            try Task.checkCancellation()
             let token = try await auth.accessToken(refresh: attempt == 1)
             let request = try build(WHOXRequestFactory(baseURL: baseURL, accessToken: token))
             let (data, response) = try await session.data(for: request)

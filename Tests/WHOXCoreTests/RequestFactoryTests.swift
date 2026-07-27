@@ -36,3 +36,44 @@ import Testing
     #expect(json["session_id"] == "ios-main")
     #expect(!String(decoding: body, as: UTF8.self).contains("API_SERVER_KEY"))
 }
+
+@Test func buildsBinaryAttachmentUploadRequest() throws {
+    let factory = WHOXRequestFactory(
+        baseURL: URL(string: "https://mobile-api.whox.ai")!,
+        accessToken: "mobile-access-token"
+    )
+    let bytes = Data([0x25, 0x50, 0x44, 0x46])
+
+    let request = try factory.upload(
+        attachmentID: "70d2a3e8-9fc8-4c66-b5dc-cf61b9c19cc2",
+        filename: "Q3 freight plan.pdf",
+        mimeType: "application/pdf",
+        data: bytes
+    )
+
+    #expect(request.httpMethod == "PUT")
+    #expect(request.url?.path == "/v1/uploads/70d2a3e8-9fc8-4c66-b5dc-cf61b9c19cc2")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer mobile-access-token")
+    #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/pdf")
+    #expect(request.value(forHTTPHeaderField: "X-WHOX-Filename") == "Q3%20freight%20plan.pdf")
+    #expect(request.httpBody == bytes)
+}
+
+@Test func chatRequestCarriesUploadedAttachmentReferences() throws {
+    let factory = WHOXRequestFactory(
+        baseURL: URL(string: "https://mobile-api.whox.ai")!,
+        accessToken: "mobile-access-token"
+    )
+
+    let request = try factory.chat(
+        sessionID: "ios-main",
+        message: "Summarize these",
+        attachmentIDs: ["image-id", "document-id"]
+    )
+    let body = try #require(request.httpBody)
+    let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+    #expect(json["message"] as? String == "Summarize these")
+    #expect(json["attachment_ids"] as? [String] == ["image-id", "document-id"])
+    #expect(request.value(forHTTPHeaderField: "Accept") == "text/event-stream")
+}

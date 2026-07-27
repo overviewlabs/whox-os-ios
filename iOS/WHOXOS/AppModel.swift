@@ -9,6 +9,23 @@ struct LocalProject: Codable, Identifiable, Equatable {
     var createdAt = Date()
 }
 
+struct PendingChatAttachment: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let name: String
+    let mimeType: String
+    let data: Data
+
+    init(id: UUID = UUID(), name: String, mimeType: String, data: Data) {
+        self.id = id
+        self.name = name
+        self.mimeType = mimeType
+        self.data = data
+    }
+
+    var isImage: Bool { mimeType.hasPrefix("image/") }
+    var size: Int { data.count }
+}
+
 @MainActor @Observable
 final class AppModel {
     enum Connection: Equatable { case unpaired, connecting, connected(serverName: String), failed(message: String) }
@@ -30,6 +47,7 @@ final class AppModel {
     var errorMessage: String?
     var activeRunID: String?
     var pendingApproval: RunEvent?
+    var pendingAttachments: [PendingChatAttachment] = []
 
     private let authenticationService: AuthenticationService
     private let gateway: GatewayService
@@ -96,6 +114,7 @@ final class AppModel {
 
     func selectSession(_ id: String?) async {
         discardChat()
+        clearPendingAttachments()
         let requestID = UUID()
         sessionLoadID = requestID
         selectedSessionID = id
@@ -116,6 +135,7 @@ final class AppModel {
 
     func newChat() {
         discardChat()
+        clearPendingAttachments()
         sessionLoadID = UUID()
         selectedSessionID = nil
         messages = []
@@ -133,16 +153,40 @@ final class AppModel {
         }
     }
 
+    func addAttachment(name: String, mimeType: String, data: Data) {
+        guard pendingAttachments.count < 5 else {
+            errorMessage = "You can attach up to 5 files per message."
+            return
+        }
+        guard !data.isEmpty, data.count <= 20 * 1024 * 1024 else {
+            errorMessage = "Each attachment must be 20 MB or smaller."
+            return
+        }
+        guard pendingAttachments.reduce(0, { $0 + $1.size }) + data.count <= 50 * 1024 * 1024 else {
+            errorMessage = "Attachments for one message must total 50 MB or less."
+            return
+        }
+        pendingAttachments.append(.init(name: name, mimeType: mimeType, data: data))
+        errorMessage = nil
+    }
+
+    func removeAttachment(_ id: UUID) {
+        guard !isSending else { return }
+        pendingAttachments.removeAll { $0.id == id }
+    }
+
     func stopSending() { chatTask?.cancel() }
 
     private func performSend(_ raw: String, operationID: UUID) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, chatOperationID == operationID else { return }
+        let attachments = pendingAttachments
+        guard (!text.isEmpty || !attachments.isEmpty), chatOperationID == operationID else { return }
         isSending = true
         errorMessage = nil
         do {
             if selectedSessionID == nil {
-                let session = try await gateway.createSession(title: String(text.prefix(56)))
+                let titleSource = text.isEmpty ? (attachments.first?.name ?? "New chat") : text
+                let session = try await gateway.createSession(title: String(titleSource.prefix(56)))
                 try Task.checkCancellation()
                 guard chatOperationID == operationID else { return }
                 selectedSessionID = session.id
@@ -150,11 +194,22 @@ final class AppModel {
             }
             try Task.checkCancellation()
             guard chatOperationID == operationID else { return }
-            messages.append(ChatMessage(id: "local-user-\(UUID())", role: .user, content: text, timestamp: Date().timeIntervalSince1970))
+            for attachment in attachments {
+                try await gateway.upload(attachment)
+                try Task.checkCancellation()
+            }
+            guard chatOperationID == operationID else { return }
+            let attachmentSummary = attachments.map { "📎 \($0.name)" }.joined(separator: "\n")
+            let localContent = [text, attachmentSummary].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            messages.append(ChatMessage(id: "local-user-\(UUID())", role: .user, content: localContent, timestamp: Date().timeIntervalSince1970))
             let assistantID = "stream-\(UUID())"
             messages.append(ChatMessage(id: assistantID, role: .assistant, content: ""))
             guard let selectedSessionID else { throw GatewayError.invalidResponse }
-            try await gateway.streamChat(sessionID: selectedSessionID, message: text) { [weak self] event in
+            try await gateway.streamChat(
+                sessionID: selectedSessionID,
+                message: text,
+                attachmentIDs: attachments.map { $0.id.uuidString.lowercased() }
+            ) { [weak self] event in
                 guard let self, self.chatOperationID == operationID else { return }
                 switch event {
                 case .delta(let delta):
@@ -169,6 +224,7 @@ final class AppModel {
             try Task.checkCancellation()
             guard chatOperationID == operationID else { return }
             if let i = messages.firstIndex(where: { $0.id == assistantID }), messages[i].content.isEmpty { messages.remove(at: i) }
+            clearPendingAttachments()
             await refreshSessions()
         } catch is CancellationError {
             removeEmptyAssistant(operationID)
@@ -324,7 +380,10 @@ final class AppModel {
         errorMessage = nil
         activeRunID = nil
         pendingApproval = nil
+        clearPendingAttachments()
     }
+
+    private func clearPendingAttachments() { pendingAttachments = [] }
 
     private func handle(_ error: Error) {
         errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
