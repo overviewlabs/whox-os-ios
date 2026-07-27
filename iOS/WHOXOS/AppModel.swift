@@ -48,14 +48,9 @@ final class AppModel {
             } else {
                 authenticationState = .signedOut
             }
-        } catch let error as AuthenticationError {
-            authenticationState = .signedOut
-            if error != .sessionExpired {
-                authenticationError = error.localizedDescription
-            }
         } catch {
             authenticationState = .signedOut
-            authenticationError = AuthenticationError.unavailable.localizedDescription
+            authenticationError = nil
         }
     }
 
