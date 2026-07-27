@@ -57,6 +57,16 @@ for appearance in light dark; do
     xcrun simctl launch "$UDID" com.whox.whoxos
     sleep 3
     xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/login-${appearance}.png"
+
+    xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
+    xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-chat
+    sleep 2
+    xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/chat-${appearance}.png"
+
+    xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
+    xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-settings
+    sleep 2
+    xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/settings-${appearance}.png"
 done
 
-sips -g pixelWidth -g pixelHeight .build/screenshots/login-light.png .build/screenshots/login-dark.png
+sips -g pixelWidth -g pixelHeight .build/screenshots/*.png

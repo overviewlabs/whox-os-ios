@@ -75,5 +75,18 @@ import Testing
 
     #expect(json["message"] as? String == "Summarize these")
     #expect(json["attachment_ids"] as? [String] == ["image-id", "document-id"])
+    #expect(request.url?.path == "/v1/sessions/ios-main/chat/stream")
     #expect(request.value(forHTTPHeaderField: "Accept") == "text/event-stream")
+}
+
+@Test func buildsCompleteChatRequestWhenStreamingIsDisabled() throws {
+    let factory = WHOXRequestFactory(
+        baseURL: URL(string: "https://mobile-api.whox.ai")!,
+        accessToken: "mobile-access-token"
+    )
+
+    let request = try factory.chat(sessionID: "ios-main", message: "Hello", stream: false)
+
+    #expect(request.url?.path == "/v1/sessions/ios-main/chat")
+    #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
 }

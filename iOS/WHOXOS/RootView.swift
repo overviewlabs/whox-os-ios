@@ -7,6 +7,14 @@ struct RootView: View {
     @State private var destination: AppDestination = .chat
     @State private var isDrawerOpen = false
 
+    init() {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--visual-review-settings") {
+            _destination = State(initialValue: .settings)
+        }
+#endif
+    }
+
     var body: some View {
         Group {
             switch model.authenticationState {

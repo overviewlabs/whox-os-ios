@@ -48,6 +48,9 @@ final class AppModel {
     var activeRunID: String?
     var pendingApproval: RunEvent?
     var pendingAttachments: [PendingChatAttachment] = []
+    var streamResponses = true {
+        didSet { defaults.set(streamResponses, forKey: "whox.streamResponses") }
+    }
 
     private let authenticationService: AuthenticationService
     private let gateway: GatewayService
@@ -61,8 +64,41 @@ final class AppModel {
         let authenticationService = AuthenticationService()
         self.authenticationService = authenticationService
         self.gateway = GatewayService(auth: authenticationService)
+        self.streamResponses = defaults.object(forKey: "whox.streamResponses") as? Bool ?? true
         defaults.removeObject(forKey: "whox.projects")
         defaults.removeObject(forKey: "whox.pinnedSessions")
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--visual-review-") }) {
+            authenticationState = .signedIn(.init(id: "visual-review", email: "evans@whox.ai", role: "owner"))
+            connection = .connected(serverName: "WHOX OS")
+            sessions = [.init(id: "visual-review", title: "General Assistance for Evans")]
+            selectedSessionID = "visual-review"
+            messages = [
+                .init(
+                    id: "visual-user",
+                    role: .user,
+                    content: "Describe this image\n\n📎 mechanical-room.jpg"
+                ),
+                .init(
+                    id: "visual-assistant",
+                    role: .assistant,
+                    content: """
+                    ## What’s in the image
+
+                    This appears to be a **basement mechanical room** with an HVAC furnace and exposed utility connections.
+
+                    ### Key details
+
+                    - **Furnace:** A gray metal unit sits along the left wall.
+                    - **Gas line:** Black iron piping runs overhead with a red shutoff valve.
+                    - **Work area:** A red stepladder and scattered debris suggest active maintenance.
+
+                    > The gas valve should remain accessible and unobstructed.
+                    """
+                ),
+            ]
+        }
+#endif
     }
 
     var selectedSession: WHOXSession? { sessions.first { $0.id == selectedSessionID } }
@@ -125,7 +161,7 @@ final class AppModel {
         do {
             let loaded = try await gateway.messages(id)
             guard sessionLoadID == requestID, selectedSessionID == id else { return }
-            messages = loaded
+            messages = loaded.compactMap(presentedMessage)
             errorMessage = nil
         } catch {
             guard sessionLoadID == requestID else { return }
@@ -180,6 +216,7 @@ final class AppModel {
     private func performSend(_ raw: String, operationID: UUID) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = pendingAttachments
+        let shouldStream = streamResponses
         guard (!text.isEmpty || !attachments.isEmpty), chatOperationID == operationID else { return }
         isSending = true
         errorMessage = nil
@@ -205,21 +242,33 @@ final class AppModel {
             let assistantID = "stream-\(UUID())"
             messages.append(ChatMessage(id: assistantID, role: .assistant, content: ""))
             guard let selectedSessionID else { throw GatewayError.invalidResponse }
-            try await gateway.streamChat(
-                sessionID: selectedSessionID,
-                message: text,
-                attachmentIDs: attachments.map { $0.id.uuidString.lowercased() }
-            ) { [weak self] event in
-                guard let self, self.chatOperationID == operationID else { return }
-                switch event {
-                case .delta(let delta):
-                    if let i = self.messages.firstIndex(where: { $0.id == assistantID }) { self.messages[i].content += delta }
-                case .message(let message):
-                    if let i = self.messages.firstIndex(where: { $0.id == assistantID }) { self.messages[i] = message }
-                case .session(let id): self.selectedSessionID = id
-                case .error(let message): self.errorMessage = message
-                case .done: break
+            let attachmentIDs = attachments.map { $0.id.uuidString.lowercased() }
+            if shouldStream {
+                try await gateway.streamChat(
+                    sessionID: selectedSessionID,
+                    message: text,
+                    attachmentIDs: attachmentIDs
+                ) { [weak self] event in
+                    guard let self, self.chatOperationID == operationID else { return }
+                    switch event {
+                    case .delta(let delta):
+                        if let i = self.messages.firstIndex(where: { $0.id == assistantID }) { self.messages[i].content += delta }
+                    case .message(let message):
+                        if let i = self.messages.firstIndex(where: { $0.id == assistantID }) { self.messages[i] = message }
+                    case .session(let id): self.selectedSessionID = id
+                    case .error(let message): self.errorMessage = message
+                    case .done: break
+                    }
                 }
+            } else {
+                let response = try await gateway.completeChat(
+                    sessionID: selectedSessionID,
+                    message: text,
+                    attachmentIDs: attachmentIDs
+                )
+                guard chatOperationID == operationID else { return }
+                if let i = messages.firstIndex(where: { $0.id == assistantID }) { messages[i] = response.message }
+                self.selectedSessionID = response.sessionID
             }
             try Task.checkCancellation()
             guard chatOperationID == operationID else { return }
@@ -232,6 +281,7 @@ final class AppModel {
             removeEmptyAssistant(operationID)
         } catch {
             guard chatOperationID == operationID else { return }
+            removeEmptyAssistant(operationID)
             handle(error)
         }
     }
@@ -384,6 +434,14 @@ final class AppModel {
     }
 
     private func clearPendingAttachments() { pendingAttachments = [] }
+
+    private func presentedMessage(_ message: ChatMessage) -> ChatMessage? {
+        guard ChatPresentation.isVisible(message.role) else { return nil }
+        guard message.role == .user else { return message }
+        var presented = message
+        presented.content = ChatPresentation.sanitizeUserContent(message.content)
+        return presented
+    }
 
     private func handle(_ error: Error) {
         errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

@@ -36,6 +36,18 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Responses") {
+                Toggle("Stream Responses", isOn: Binding(
+                    get: { model.streamResponses },
+                    set: { model.streamResponses = $0 }
+                ))
+                Text(model.streamResponses
+                     ? "Show responses as WHOX OS writes them."
+                     : "Wait for the complete response before displaying it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("About") {
                 LabeledContent("App", value: "WHOX OS")
                 LabeledContent("Version", value: "0.1.0")

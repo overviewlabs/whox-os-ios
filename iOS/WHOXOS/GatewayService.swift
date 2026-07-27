@@ -34,17 +34,13 @@ actor GatewayService {
     func health() async throws -> JSONValue { try await decode { try $0.health() } }
 
     func upload(_ attachment: PendingChatAttachment) async throws {
-        do {
-            _ = try await raw {
-                try $0.upload(
-                    attachmentID: attachment.id.uuidString.lowercased(),
-                    filename: attachment.name,
-                    mimeType: attachment.mimeType,
-                    data: attachment.data
-                )
-            }
-        } catch GatewayError.server(let code, _) where code == 409 {
-            // Retry a previously staged immutable attachment without overwriting it.
+        _ = try await raw {
+            try $0.upload(
+                attachmentID: attachment.id.uuidString.lowercased(),
+                filename: attachment.name,
+                mimeType: attachment.mimeType,
+                data: attachment.data
+            )
         }
     }
 
@@ -68,6 +64,17 @@ actor GatewayService {
             return
         }
         throw AuthenticationError.sessionExpired
+    }
+
+    func completeChat(sessionID: String, message: String, attachmentIDs: [String] = []) async throws -> ChatResponse {
+        try await decode {
+            try $0.chat(
+                sessionID: sessionID,
+                message: message,
+                attachmentIDs: attachmentIDs,
+                stream: false
+            )
+        }
     }
 
     private func decode<T: Decodable>(_ build: (WHOXRequestFactory) throws -> URLRequest) async throws -> T {

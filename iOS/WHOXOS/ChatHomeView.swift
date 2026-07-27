@@ -260,22 +260,108 @@ struct ChatHomeView: View {
 
 private struct MessageRow: View {
     let message: ChatMessage
+
     var body: some View {
-        HStack {
+        HStack(alignment: .top) {
             if message.role == .user { Spacer(minLength: 54) }
-            VStack(alignment: .leading, spacing: 10) {
-                markdown
-                if let calls = message.toolCalls, !calls.isEmpty {
-                    ForEach(Array(calls.enumerated()), id: \.offset) { _, call in
-                        DisclosureGroup { Text(call.result?.displayString ?? call.arguments?.displayString ?? "").font(.caption.monospaced()).textSelection(.enabled) } label: { Label(call.name ?? "Tool", systemImage: call.status == "completed" ? "checkmark.circle" : "wrench.and.screwdriver").font(.caption.weight(.medium)) }
+            StructuredChatText(content: message.content)
+                .padding(message.role == .user ? 12 : 0)
+                .background(
+                    message.role == .user ? WHOXTheme.surface : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+            if message.role != .user { Spacer(minLength: 0) }
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
+private struct StructuredChatText: View {
+    let content: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(Array(ChatPresentation.blocks(content).enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: ChatContentBlock) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            inlineMarkdown(text)
+                .font(headingFont(level))
+                .padding(.top, level <= 2 ? 2 : 0)
+        case .paragraph(let text):
+            inlineMarkdown(text)
+                .font(.body)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        case .unorderedList(let items):
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("•").font(.body.weight(.semibold))
+                        inlineMarkdown(item).frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                if let reasoning = message.reasoning, !reasoning.isEmpty { DisclosureGroup("Reasoning") { Text(reasoning).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled) }.font(.caption) }
             }
-            .padding(message.role == .user ? 12 : 0)
-            .background(message.role == .user ? WHOXTheme.surface : Color.clear, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            if message.role != .user { Spacer(minLength: 0) }
-        }.padding(.horizontal, 16)
+        case .orderedList(let items):
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("\(index + 1).")
+                            .font(.body.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        inlineMarkdown(item).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        case .quote(let text):
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.secondary.opacity(0.45))
+                    .frame(width: 3)
+                inlineMarkdown(text)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .code(let language, let code):
+            VStack(alignment: .leading, spacing: 8) {
+                if let language { Text(language.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(code)
+                        .font(.system(.callout, design: .monospaced))
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(WHOXTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 12).stroke(WHOXTheme.border, lineWidth: 0.7) }
+        case .divider:
+            Divider()
+        }
     }
-    private var markdown: Text { (try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .full))) .map { Text($0) } ?? Text(message.content) }
+
+    private func inlineMarkdown(_ source: String) -> Text {
+        guard let attributed = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) else { return Text(source) }
+        return Text(attributed)
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: .title2.bold()
+        case 2: .title3.bold()
+        case 3: .headline
+        default: .subheadline.weight(.semibold)
+        }
+    }
 }
