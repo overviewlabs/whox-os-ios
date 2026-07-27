@@ -40,3 +40,15 @@ jobs:
           -derivedDataPath .build/DerivedData
           CODE_SIGNING_ALLOWED=NO
           clean build
+
+      - name: Capture Light and Dark login screens
+        run: bash Scripts/capture-simulator-screenshots.sh
+
+      - name: Upload simulator screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whox-os-login-screens
+          path: .build/screenshots/*.png
+          if-no-files-found: error
+          retention-days: 7
