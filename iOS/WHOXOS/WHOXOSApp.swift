@@ -8,7 +8,6 @@ struct WHOXOSApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
-                .preferredColorScheme(.dark)
         }
     }
 }
