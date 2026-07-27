@@ -108,6 +108,30 @@ jobs:
           test "$(plutil -extract Entitlements.application-identifier raw -o - "$RUNNER_TEMP/profile.plist")" = '8PN4T7SR2G.com.whox.whoxos'
           printf 'Signed IPA validated: com.whox.whoxos %s (%s)\n' '${{ inputs.version }}' '${{ inputs.build_number }}'
 
+      - name: Upload to App Store Connect
+        env:
+          ASC_PRIVATE_KEY_BASE64: ${{ secrets.ASC_PRIVATE_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$ASC_PRIVATE_KEY_BASE64"
+          test -n "$ASC_KEY_ID"
+          test -n "$ASC_ISSUER_ID"
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          KEY_PATH="$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          mkdir -p "$KEY_DIR"
+          printf '%s' "$ASC_PRIVATE_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          printf 'ASC_PRIVATE_KEY_PATH=%s\n' "$KEY_PATH" >> "$GITHUB_ENV"
+          IPA=("$RUNNER_TEMP"/export/*.ipa)
+          xcrun altool \
+            --upload-app \
+            --type ios \
+            --file "${IPA[0]}" \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
+
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v5
         with:
@@ -120,5 +144,6 @@ jobs:
         if: always()
         run: |
           set +e
+          [[ -n "${ASC_PRIVATE_KEY_PATH:-}" ]] && rm -f "$ASC_PRIVATE_KEY_PATH"
           [[ -n "${INSTALLED_PROFILE:-}" ]] && rm -f "$INSTALLED_PROFILE"
           [[ -n "${SIGNING_KEYCHAIN:-}" ]] && security delete-keychain "$SIGNING_KEYCHAIN"
