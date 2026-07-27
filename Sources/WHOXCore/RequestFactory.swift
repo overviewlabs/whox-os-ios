@@ -17,12 +17,13 @@ public struct WHOXRequestFactory: Sendable {
     public func updateSession(_ id: String, title: String) throws -> URLRequest { try jsonRequest(path: "/v1/sessions/\(escaped(id))", method: "PATCH", object: ["title": title]) }
     public func deleteSession(_ id: String) throws -> URLRequest { try request(path: "/v1/sessions/\(escaped(id))", method: "DELETE") }
     public func startRun(input: String, sessionID: String) throws -> URLRequest { try jsonRequest(path: "/v1/runs", method: "POST", object: ["input": input, "session_id": sessionID]) }
-    public func chat(sessionID: String, message: String, attachmentIDs: [String] = [], stream: Bool = true) throws -> URLRequest {
+    public func chat(sessionID: String, message: String, attachmentIDs: [String] = [], requestID: String? = nil, stream: Bool = true) throws -> URLRequest {
         let suffix = stream ? "/chat/stream" : "/chat"
         var object: [String: Any] = ["message": message]
         if !attachmentIDs.isEmpty { object["attachment_ids"] = attachmentIDs }
         var r = try jsonRequest(path: "/v1/sessions/\(escaped(sessionID))\(suffix)", method: "POST", object: object)
         if stream { r.setValue("text/event-stream", forHTTPHeaderField: "Accept") }
+        if let requestID { r.setValue(requestID, forHTTPHeaderField: "X-WHOX-Turn-ID") }
         return r
     }
     public func upload(attachmentID: String, filename: String, mimeType: String, data: Data) throws -> URLRequest {

@@ -44,11 +44,16 @@ actor GatewayService {
         }
     }
 
-    func streamChat(sessionID: String, message: String, attachmentIDs: [String] = [], onEvent: @MainActor @escaping (ChatStreamEvent) -> Void) async throws {
+    func streamChat(sessionID: String, message: String, attachmentIDs: [String] = [], requestID: String, onEvent: @MainActor @escaping (ChatStreamEvent) -> Void) async throws {
         for attempt in 0...1 {
             try Task.checkCancellation()
             let token = try await auth.accessToken(refresh: attempt == 1)
-            let request = try WHOXRequestFactory(baseURL: baseURL, accessToken: token).chat(sessionID: sessionID, message: message, attachmentIDs: attachmentIDs)
+            let request = try WHOXRequestFactory(baseURL: baseURL, accessToken: token).chat(
+                sessionID: sessionID,
+                message: message,
+                attachmentIDs: attachmentIDs,
+                requestID: requestID
+            )
             let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse else { throw GatewayError.invalidResponse }
             if http.statusCode == 401 {
@@ -66,12 +71,13 @@ actor GatewayService {
         throw AuthenticationError.sessionExpired
     }
 
-    func completeChat(sessionID: String, message: String, attachmentIDs: [String] = []) async throws -> ChatResponse {
+    func completeChat(sessionID: String, message: String, attachmentIDs: [String] = [], requestID: String) async throws -> ChatResponse {
         try await decode {
             try $0.chat(
                 sessionID: sessionID,
                 message: message,
                 attachmentIDs: attachmentIDs,
+                requestID: requestID,
                 stream: false
             )
         }

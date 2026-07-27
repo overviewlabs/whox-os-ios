@@ -236,6 +236,7 @@ final class AppModel {
                 try Task.checkCancellation()
             }
             guard chatOperationID == operationID else { return }
+            clearPendingAttachments()
             let attachmentSummary = attachments.map { "📎 \($0.name)" }.joined(separator: "\n")
             let localContent = [text, attachmentSummary].filter { !$0.isEmpty }.joined(separator: "\n\n")
             messages.append(ChatMessage(id: "local-user-\(UUID())", role: .user, content: localContent, timestamp: Date().timeIntervalSince1970))
@@ -247,7 +248,8 @@ final class AppModel {
                 try await gateway.streamChat(
                     sessionID: selectedSessionID,
                     message: text,
-                    attachmentIDs: attachmentIDs
+                    attachmentIDs: attachmentIDs,
+                    requestID: operationID.uuidString.lowercased()
                 ) { [weak self] event in
                     guard let self, self.chatOperationID == operationID else { return }
                     switch event {
@@ -264,7 +266,8 @@ final class AppModel {
                 let response = try await gateway.completeChat(
                     sessionID: selectedSessionID,
                     message: text,
-                    attachmentIDs: attachmentIDs
+                    attachmentIDs: attachmentIDs,
+                    requestID: operationID.uuidString.lowercased()
                 )
                 guard chatOperationID == operationID else { return }
                 if let i = messages.firstIndex(where: { $0.id == assistantID }) { messages[i] = response.message }
@@ -273,7 +276,6 @@ final class AppModel {
             try Task.checkCancellation()
             guard chatOperationID == operationID else { return }
             if let i = messages.firstIndex(where: { $0.id == assistantID }), messages[i].content.isEmpty { messages.remove(at: i) }
-            clearPendingAttachments()
             await refreshSessions()
         } catch is CancellationError {
             removeEmptyAssistant(operationID)

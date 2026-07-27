@@ -59,7 +59,7 @@ import Testing
     #expect(request.httpBody == bytes)
 }
 
-@Test func chatRequestCarriesUploadedAttachmentReferences() throws {
+@Test func chatRequestCarriesUploadedAttachmentReferencesAndTurnID() throws {
     let factory = WHOXRequestFactory(
         baseURL: URL(string: "https://mobile-api.whox.ai")!,
         accessToken: "mobile-access-token"
@@ -68,7 +68,8 @@ import Testing
     let request = try factory.chat(
         sessionID: "ios-main",
         message: "Summarize these",
-        attachmentIDs: ["image-id", "document-id"]
+        attachmentIDs: ["image-id", "document-id"],
+        requestID: "00000000-0000-4000-8000-000000000014"
     )
     let body = try #require(request.httpBody)
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
@@ -77,6 +78,7 @@ import Testing
     #expect(json["attachment_ids"] as? [String] == ["image-id", "document-id"])
     #expect(request.url?.path == "/v1/sessions/ios-main/chat/stream")
     #expect(request.value(forHTTPHeaderField: "Accept") == "text/event-stream")
+    #expect(request.value(forHTTPHeaderField: "X-WHOX-Turn-ID") == "00000000-0000-4000-8000-000000000014")
 }
 
 @Test func buildsCompleteChatRequestWhenStreamingIsDisabled() throws {
