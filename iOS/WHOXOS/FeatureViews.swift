@@ -22,7 +22,27 @@ struct LibraryView: View {
 private struct SessionDetailView: View {
     @Environment(AppModel.self) private var model
     let session: WHOXSession
-    var body: some View { ScrollView { LazyVStack(spacing: 20) { ForEach(model.messages) { message in VStack(alignment: .leading) { Text(message.role.displayName).font(.caption.bold()).foregroundStyle(.secondary); Text((try? AttributedString(markdown: message.content)).map(Text.init) ?? Text(message.content)).textSelection(.enabled) }.frame(maxWidth: .infinity, alignment: .leading) } }.padding() }.navigationTitle(session.title ?? "Chat").navigationBarTitleDisplayMode(.inline).task { await model.selectSession(session.id) } }
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 20) {
+                ForEach(model.messages) { message in
+                    VStack(alignment: .leading) {
+                        Text(message.role.displayName).font(.caption.bold()).foregroundStyle(.secondary)
+                        Group {
+                            if let attributed = try? AttributedString(markdown: message.content) { Text(attributed) }
+                            else { Text(message.content) }
+                        }
+                        .textSelection(.enabled)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle(session.title ?? "Chat")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.selectSession(session.id) }
+    }
 }
 
 struct ProjectsView: View {
@@ -217,7 +237,7 @@ struct HealthView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Label(model.inspector["Health"] == nil ? "Checking gateway" : "Gateway responded", systemImage: model.inspector["Health"] == nil ? "hourglass" : "checkmark.circle.fill")
-                    .font(.headline).foregroundStyle(model.inspector["Health"] == nil ? .secondary : .green)
+                    .font(.headline).foregroundStyle(model.inspector["Health"] == nil ? Color.secondary : Color.green)
                 ForEach(healthRows, id: \.0) { key, value in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(key.replacingOccurrences(of: "_", with: " ").capitalized)
