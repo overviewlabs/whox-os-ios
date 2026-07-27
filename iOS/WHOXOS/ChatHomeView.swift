@@ -306,8 +306,11 @@ private struct StructuredChatText: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("•").font(.body.weight(.semibold))
-                        inlineMarkdown(item).frame(maxWidth: .infinity, alignment: .leading)
+                        inlineMarkdown(item)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
         case .orderedList(let items):
@@ -317,19 +320,24 @@ private struct StructuredChatText: View {
                         Text("\(index + 1).")
                             .font(.body.monospacedDigit().weight(.semibold))
                             .foregroundStyle(.secondary)
-                        inlineMarkdown(item).frame(maxWidth: .infinity, alignment: .leading)
+                        inlineMarkdown(item)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
         case .quote(let text):
-            HStack(alignment: .top, spacing: 10) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.secondary.opacity(0.45))
-                    .frame(width: 3)
-                inlineMarkdown(text)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            inlineMarkdown(text)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 13)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.secondary.opacity(0.45))
+                        .frame(width: 3)
+                }
         case .code(let language, let code):
             VStack(alignment: .leading, spacing: 8) {
                 if let language { Text(language.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
