@@ -40,7 +40,7 @@ struct DirectoryDrawer: View {
                 }
             }
         }
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(WHOXTheme.background)
         .task {
             if model.directoryListing == nil { await model.loadDirectory("") }
         }
@@ -55,12 +55,13 @@ struct DirectoryDrawer: View {
         HStack(spacing: 12) {
             Image(systemName: "externaldrive.fill")
                 .font(.title3.weight(.semibold))
-                .frame(width: 44, height: 44)
-                .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                .frame(width: 46, height: 46)
+                .background(Color.primary.opacity(0.08), in: Circle())
+                .overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("WHOX OS").font(.headline)
-                Text("True-root files · read only")
+                Text("WHOX OS").font(.system(size: 21, weight: .semibold))
+                Text("Folders and files · read only")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -70,13 +71,14 @@ struct DirectoryDrawer: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.body.weight(.semibold))
-                    .frame(width: 44, height: 44)
-                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                    .frame(width: 46, height: 46)
+                    .background(Color.primary.opacity(0.08), in: Circle())
+                    .overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) }
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close directory")
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 22)
         .padding(.top, 14)
         .padding(.bottom, 12)
     }
@@ -114,7 +116,7 @@ struct DirectoryDrawer: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
-        .background(Color(uiColor: .tertiarySystemFill))
+        .background(Color.primary.opacity(0.04))
         .overlay(alignment: .bottom) { Divider() }
     }
 
@@ -155,7 +157,7 @@ struct DirectoryDrawer: View {
             HStack(spacing: 15) {
                 Image(systemName: entry.isDirectory ? "folder.fill" : fileIcon(entry.name))
                     .font(.title3)
-                    .foregroundStyle(entry.isDirectory ? Color.accentColor : Color.primary)
+                    .foregroundStyle(Color.primary)
                     .frame(width: 34)
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -198,8 +200,20 @@ struct DirectoryDrawer: View {
                 }
             }
         }
-        .accessibilityLabel(entry.isDirectory ? "Folder, \(entry.name)" : "File, \(entry.name), preview")
-        .accessibilityHint(entry.isDirectory ? "Opens this folder" : "Opens a read-only preview. Touch and hold to add it to chat.")
+        .accessibilityLabel(entryAccessibilityLabel(entry))
+        .accessibilityHint(entry.isDirectory ? "Opens this folder" : "Opens a read-only preview")
+        .accessibilityAction(named: "Add to Chat") {
+            if !entry.isDirectory { addToChat(entry) }
+        }
+    }
+
+    private func entryAccessibilityLabel(_ entry: DirectoryEntry) -> String {
+        guard !entry.isDirectory else { return "Folder, \(entry.name)" }
+        if let size = entry.size {
+            let formatted = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+            return "File, \(entry.name), \(formatted), preview"
+        }
+        return "File, \(entry.name), preview"
     }
 
     private func navigate(to path: String) {
@@ -223,7 +237,13 @@ struct DirectoryDrawer: View {
                     withIntermediateDirectories: true,
                     attributes: [.protectionKey: FileProtectionType.complete]
                 )
-                let url = folder.appendingPathComponent(entry.name)
+                guard let safeName = PreviewFilenameContract.safeFilename(entry.name) else {
+                    throw CocoaError(.fileWriteInvalidFileName)
+                }
+                let url = folder.appendingPathComponent(safeName, isDirectory: false)
+                guard url.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL else {
+                    throw CocoaError(.fileWriteInvalidFileName)
+                }
                 try data.write(to: url, options: [.atomic, .completeFileProtection])
                 previewFolderURL = folder
                 preview = DirectoryPreview(url: url)

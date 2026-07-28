@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WHOXCore
 
 enum AppDestination: Hashable {
@@ -51,46 +52,64 @@ struct RootView: View {
 
     private var authenticatedContent: some View {
         GeometryReader { geometry in
-            let navigationWidth = min(geometry.size.width * 0.82, 390)
-            let directoryWidth = min(geometry.size.width * 0.82, 390)
+            let navigationWidth = DrawerPresentationContract.width(containerWidth: geometry.size.width)
+            let directoryWidth = DrawerPresentationContract.width(containerWidth: geometry.size.width)
             let leadingProgress = panelProgress(.leading, width: navigationWidth)
             let trailingProgress = panelProgress(.trailing, width: directoryWidth)
-            let overlayProgress = max(leadingProgress, trailingProgress)
+            let panelProgress = max(leadingProgress, trailingProgress)
+            let mainOffset = navigationWidth * leadingProgress - directoryWidth * trailingProgress
 
-            ZStack(alignment: .leading) {
-                mainContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .allowsHitTesting(overlayProgress == 0)
-                .accessibilityHidden(overlayProgress > 0)
-
-                if overlayProgress > 0 {
-                    Color.black.opacity(0.28 * overlayProgress)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture { closePanels() }
-                        .accessibilityLabel("Close side panel")
-                        .accessibilityAddTraits(.isButton)
+            ZStack {
+                HStack(spacing: 0) {
+                    NavigationDrawer(onSelect: select)
+                        .frame(width: navigationWidth)
+                        .frame(maxHeight: .infinity)
+                        .allowsHitTesting(leadingProgress > 0.01)
+                        .accessibilityHidden(leadingProgress == 0)
+                        .accessibilityAddTraits(.isModal)
+                    Spacer(minLength: 0)
                 }
 
-                NavigationDrawer(onSelect: select)
-                .frame(width: navigationWidth)
-                .frame(maxHeight: .infinity)
-                .offset(x: -navigationWidth * (1 - leadingProgress))
-                .shadow(color: .black.opacity(0.2 * leadingProgress), radius: 22, x: 8)
-                .allowsHitTesting(leadingProgress > 0.01)
-                .accessibilityHidden(leadingProgress == 0)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    DirectoryDrawer(model: model, onClose: closePanels)
+                        .frame(width: directoryWidth)
+                        .frame(maxHeight: .infinity)
+                        .allowsHitTesting(trailingProgress > 0.01)
+                        .accessibilityHidden(trailingProgress == 0)
+                        .accessibilityAddTraits(.isModal)
+                }
 
-                DirectoryDrawer(model: model, onClose: closePanels)
-                    .frame(width: directoryWidth)
-                    .frame(maxHeight: .infinity)
-                    .offset(x: geometry.size.width - directoryWidth * trailingProgress)
-                    .shadow(color: .black.opacity(0.2 * trailingProgress), radius: 22, x: -8)
-                    .allowsHitTesting(trailingProgress > 0.01)
-                    .accessibilityHidden(trailingProgress == 0)
+                mainContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay {
+                        if panelProgress > 0 {
+                            Color.black.opacity(0.26 * panelProgress)
+                                .contentShape(Rectangle())
+                                .onTapGesture { closePanels() }
+                                .accessibilityLabel("Close side panel")
+                                .accessibilityAddTraits(.isButton)
+                        }
+                    }
+                    .clipShape(UnevenRoundedRectangle(
+                        topLeadingRadius: leadingProgress * 42,
+                        bottomLeadingRadius: leadingProgress * 42,
+                        bottomTrailingRadius: trailingProgress * 42,
+                        topTrailingRadius: trailingProgress * 42,
+                        style: .continuous
+                    ))
+                    .shadow(color: .black.opacity(0.3 * panelProgress), radius: 24, x: mainOffset > 0 ? -8 : 8)
+                    .offset(x: mainOffset)
+                    .accessibilityHidden(panelProgress > 0)
             }
+            .background(WHOXTheme.background.ignoresSafeArea())
             .clipped()
             .contentShape(Rectangle())
-            .simultaneousGesture(panelDrag(containerWidth: geometry.size.width, leadingWidth: navigationWidth, trailingWidth: directoryWidth))
+            .simultaneousGesture(panelDrag(
+                containerWidth: geometry.size.width,
+                leadingWidth: navigationWidth,
+                trailingWidth: directoryWidth
+            ))
         }
         .background(WHOXTheme.background.ignoresSafeArea())
         .onReceive(NotificationCenter.default.publisher(for: .whoxDebugToggleDrawer)) { _ in
@@ -175,6 +194,7 @@ struct RootView: View {
                         startX: value.startLocation.x,
                         containerWidth: containerWidth
                     )
+                    if dragSide != nil { dismissKeyboard() }
                 }
                 guard let side = dragSide else { return }
                 switch (side, openPanel) {
@@ -221,11 +241,21 @@ struct RootView: View {
     }
 
     private func open(_ side: DrawerSide) {
+        dismissKeyboard()
         withAnimation(panelAnimation) {
             dragSide = nil
             dragTranslation = 0
             openPanel = side
         }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 
     private func openDirectory() {

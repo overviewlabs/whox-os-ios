@@ -14,6 +14,9 @@ struct ChatHomeView: View {
     @State private var lastVoiceError: String?
     @State private var showingPhotoPicker = false
     @State private var showingFileImporter = false
+    @State private var showingLinks = false
+    @State private var linkInput = ""
+    @State private var pendingLinks: [String] = []
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @FocusState private var composerFocused: Bool
 
@@ -53,6 +56,7 @@ struct ChatHomeView: View {
         ) { result in
             importFiles(result)
         }
+        .sheet(isPresented: $showingLinks) { linkEditor }
         .onChange(of: voice.transcript) { _, value in
             if voice.isRecording || !value.isEmpty { draft = value }
         }
@@ -81,6 +85,10 @@ struct ChatHomeView: View {
                 draft = "Hi"
                 try? await Task.sleep(for: .milliseconds(350))
                 composerFocused = true
+            }
+            if arguments.contains("--visual-review-composer-links") {
+                draft = "Compare these sources"
+                pendingLinks = ["https://whox.ai/docs", "https://example.com/reference"]
             }
 #endif
         }
@@ -153,9 +161,12 @@ struct ChatHomeView: View {
 
     private var composer: some View {
         VStack(spacing: 6) {
-            if !model.pendingAttachments.isEmpty {
+            if !model.pendingAttachments.isEmpty || !pendingLinks.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
+                        ForEach(pendingLinks, id: \.self) { link in
+                            linkChip(link)
+                        }
                         ForEach(model.pendingAttachments) { attachment in
                             attachmentChip(attachment)
                         }
@@ -167,21 +178,14 @@ struct ChatHomeView: View {
 
             HStack(spacing: 0) {
                 Menu {
-                    Button("Photo Library", systemImage: "photo.on.rectangle") { showingPhotoPicker = true }
+                    Button("Links", systemImage: "link") {
+                        linkInput = pendingLinks.joined(separator: "\n")
+                        showingLinks = true
+                    }
                     Button("Files", systemImage: "folder") { showingFileImporter = true }
-                    Divider()
-                    Button("New chat", systemImage: "square.and.pencil") {
-                        model.newChat(); draft = ""; composerFocused = true
-                    }
-                    Button("Create an image", systemImage: "photo.badge.plus") {
-                        draft = "Create an image: "; composerFocused = true
-                    }
-                    Button("Write or edit", systemImage: "pencil.line") {
-                        draft = "Help me write or edit: "; composerFocused = true
-                    }
-                    Button("Search the web", systemImage: "globe") {
-                        draft = "Search the web for: "; composerFocused = true
-                    }
+                        .disabled(model.pendingAttachments.count >= 5)
+                    Button("Photo Library", systemImage: "photo.on.rectangle") { showingPhotoPicker = true }
+                        .disabled(model.pendingAttachments.count >= 5)
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 18, weight: .regular))
@@ -189,8 +193,8 @@ struct ChatHomeView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(model.isSending || model.pendingAttachments.count >= 5)
-                .accessibilityLabel("Add photos, files, or prompt actions")
+                .disabled(model.isSending)
+                .accessibilityLabel("Add links, files, or photos")
 
                 TextField("Ask WHOX OS", text: $draft)
                     .textFieldStyle(.plain)
@@ -290,7 +294,8 @@ struct ChatHomeView: View {
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.pendingAttachments.isEmpty
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !model.pendingAttachments.isEmpty || !pendingLinks.isEmpty
     }
 
     private func submitOrStop() {
@@ -299,9 +304,49 @@ struct ChatHomeView: View {
         if voice.isStarting { voice.cancel(); return }
         if voice.isFinalizing { return }
         guard canSend else { return }
-        let value = draft
+        let value = LinkReferenceContract.messageText(draft: draft, links: pendingLinks)
         draft = ""
+        pendingLinks = []
         model.submit(value)
+    }
+
+    private var linkEditor: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Add one web address per line. WHOX OS will use these links as references for your message.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $linkInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.body.monospaced())
+                    .padding(8)
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay { RoundedRectangle(cornerRadius: 14).stroke(WHOXTheme.border) }
+                    .accessibilityLabel("Reference links, one per line")
+            }
+            .padding(18)
+            .navigationTitle("Links")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showingLinks = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        let links = LinkReferenceContract.validLinks(from: linkInput)
+                        if links.isEmpty && !linkInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            model.errorMessage = "Enter at least one valid http or https link."
+                            return
+                        }
+                        pendingLinks = links
+                        model.errorMessage = nil
+                        showingLinks = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private func toggleVoiceInput() {
@@ -374,6 +419,28 @@ struct ChatHomeView: View {
         .background(WHOXTheme.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 13).stroke(WHOXTheme.border, lineWidth: 0.7) }
         .accessibilityElement(children: .contain)
+    }
+
+    private func linkChip(_ link: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "link")
+                .frame(width: 30, height: 30)
+                .background(Color.primary.opacity(0.08), in: Circle())
+            Text(URL(string: link)?.host ?? link)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+            Button { pendingLinks.removeAll { $0 == link } } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 44)
+            }
+            .disabled(model.isSending)
+            .accessibilityLabel("Remove link \(link)")
+        }
+        .padding(.leading, 5).padding(.trailing, 3).padding(.vertical, 4)
+        .frame(maxWidth: 260)
+        .background(WHOXTheme.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 13).stroke(WHOXTheme.border, lineWidth: 0.7) }
     }
 
     private func importPhotos(_ items: [PhotosPickerItem]) async {
