@@ -89,7 +89,10 @@ final class AppModel {
                     .init(
                         id: "visual-user",
                         role: .user,
-                        content: "Describe this image\n\n📎 mechanical-room.jpg"
+                        content: "Describe this image",
+                        attachments: [
+                            .init(id: "visual-file", name: "mechanical-room.jpg", mimeType: "image/jpeg", size: 842_100)
+                        ]
                     ),
                     .init(
                         id: "visual-assistant",
@@ -108,6 +111,11 @@ final class AppModel {
                         > The gas valve should remain accessible and unobstructed.
                         """
                     ),
+                ]
+            }
+            if arguments.contains("--visual-review-composer-attachment") {
+                pendingAttachments = [
+                    .init(name: "README.md", mimeType: "text/markdown", data: Data("Reference file".utf8))
                 ]
             }
             if arguments.contains("--visual-review-directory") {

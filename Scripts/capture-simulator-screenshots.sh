@@ -70,6 +70,11 @@ for appearance in light dark; do
     xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/composer-typed-${appearance}.png"
 
     xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
+    xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-composer-attachment
+    sleep 2
+    xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/composer-attachment-${appearance}.png"
+
+    xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
     xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-directory
     sleep 2
     xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/directory-${appearance}.png"
