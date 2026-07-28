@@ -3,6 +3,7 @@ import WHOXCore
 
 struct DirectoryDrawer: View {
     @Environment(AppModel.self) private var model
+    @AccessibilityFocusState private var closeFocused: Bool
     let onClose: () -> Void
 
     var body: some View {
@@ -14,7 +15,9 @@ struct DirectoryDrawer: View {
             content
         }
         .background(WHOXTheme.background.ignoresSafeArea())
+        .accessibilityAddTraits(.isModal)
         .task {
+            closeFocused = true
             if model.directoryListing == nil { await model.loadDirectory() }
         }
     }
@@ -35,9 +38,11 @@ struct DirectoryDrawer: View {
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 44, height: 44)
                     .background(WHOXTheme.surface, in: Circle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close file browser")
+            .accessibilityFocused($closeFocused)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -45,12 +50,13 @@ struct DirectoryDrawer: View {
 
     private var breadcrumb: some View {
         HStack(spacing: 8) {
-            if let parent = model.directoryListing?.parent {
+            if let parent = requestedParent {
                 Button {
                     Task { await model.loadDirectory(parent) }
                 } label: {
                     Image(systemName: "chevron.left")
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Parent folder")
@@ -62,15 +68,17 @@ struct DirectoryDrawer: View {
                 .truncationMode(.middle)
             Spacer()
             Button {
-                Task { await model.loadDirectory(model.directoryListing?.path ?? "") }
+                Task { await model.loadDirectory(model.requestedDirectoryPath) }
             } label: {
-                Image(systemName: "arrow.clockwise").frame(width: 36, height: 36)
+                Image(systemName: "arrow.clockwise")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Refresh directory")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
     }
 
     @ViewBuilder private var content: some View {
@@ -80,7 +88,13 @@ struct DirectoryDrawer: View {
             Spacer()
         } else if let error = model.directoryError {
             Spacer()
-            ContentUnavailableView("Directory unavailable", systemImage: "folder.badge.questionmark", description: Text(error))
+            VStack(spacing: 16) {
+                ContentUnavailableView("Directory unavailable", systemImage: "folder.badge.questionmark", description: Text(error))
+                Button("Try Again") {
+                    Task { await model.loadDirectory(model.requestedDirectoryPath) }
+                }
+                .frame(minWidth: 44, minHeight: 44)
+            }
             Spacer()
         } else if let listing = model.directoryListing {
             if listing.data.isEmpty {
@@ -96,7 +110,7 @@ struct DirectoryDrawer: View {
                         }
                     }
                 }
-                .refreshable { await model.loadDirectory(listing.path) }
+                .refreshable { await model.loadDirectory(model.requestedDirectoryPath) }
             }
         } else {
             Spacer()
@@ -105,55 +119,60 @@ struct DirectoryDrawer: View {
         }
     }
 
-    private func entryRow(_ entry: DirectoryEntry) -> some View {
-        Button {
-            if entry.isDirectory { Task { await model.loadDirectory(entry.path) } }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: entry.isDirectory ? "folder.fill" : "doc")
-                    .font(.system(size: 18))
-                    .foregroundStyle(entry.isDirectory ? Color.primary : Color.secondary)
-                    .frame(width: 32, height: 44)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.name)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    if !entry.isDirectory, let size = entry.size {
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: 8)
-                if entry.isDirectory {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+    @ViewBuilder private func entryRow(_ entry: DirectoryEntry) -> some View {
+        if entry.isDirectory {
+            Button {
+                Task { await model.loadDirectory(entry.path) }
+            } label: {
+                entryLabel(entry)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Folder, \(entry.name)")
+        } else {
+            entryLabel(entry)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("File, \(entry.name)")
+        }
+    }
+
+    private func entryLabel(_ entry: DirectoryEntry) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: entry.isDirectory ? "folder.fill" : "doc")
+                .font(.system(size: 18))
+                .foregroundStyle(entry.isDirectory ? Color.primary : Color.secondary)
+                .frame(width: 32, height: 44)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.name)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if !entry.isDirectory, let size = entry.size {
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 58)
-            .contentShape(Rectangle())
+            Spacer(minLength: 8)
+            if entry.isDirectory {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(!entry.isDirectory)
-        .accessibilityLabel(entry.isDirectory ? "Folder, \(entry.name)" : "File, \(entry.name)")
+        .padding(.horizontal, 16)
+        .frame(minHeight: 58)
+        .contentShape(Rectangle())
+    }
+
+    private var requestedParent: String? {
+        let path = model.requestedDirectoryPath
+        guard !path.isEmpty else { return nil }
+        let parts = path.split(separator: "/")
+        return parts.dropLast().joined(separator: "/")
     }
 
     private var displayPath: String {
-        guard let path = model.directoryListing?.path, !path.isEmpty else { return "/WHOX OS" }
-        return "/WHOX OS/" + path
-    }
-
-    private func fileIcon(_ name: String) -> String {
-        switch name.split(separator: ".").last?.lowercased() {
-        case "jpg", "jpeg", "png", "gif", "webp", "heic": "photo"
-        case "mp4", "mov": "film"
-        case "mp3", "wav", "m4a": "waveform"
-        case "swift", "py", "js", "ts", "html", "css", "json", "yaml", "yml": "chevron.left.forwardslash.chevron.right"
-        case "pdf": "doc.richtext"
-        default: "doc"
-        }
+        let path = model.requestedDirectoryPath
+        return path.isEmpty ? "/WHOX OS" : "/WHOX OS/" + path
     }
 }

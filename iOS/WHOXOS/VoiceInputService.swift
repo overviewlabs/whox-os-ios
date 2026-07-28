@@ -7,6 +7,7 @@ import WHOXCore
 @MainActor @Observable
 final class VoiceInputService {
     var isRecording = false
+    var isStarting = false
     var transcript = ""
     var level: Double = 0
     var errorMessage: String?
@@ -14,49 +15,83 @@ final class VoiceInputService {
     @ObservationIgnored private let audioEngine = AVAudioEngine()
     @ObservationIgnored private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     @ObservationIgnored private var recognitionTask: SFSpeechRecognitionTask?
+    @ObservationIgnored private var finalizationTask: Task<Void, Never>?
     @ObservationIgnored private var hasInputTap = false
     @ObservationIgnored private var prefix = ""
+    @ObservationIgnored private var startRequestID = UUID()
+    @ObservationIgnored private var activeRecognitionID: UUID?
+    @ObservationIgnored private var lifecycleObservers: [NSObjectProtocol] = []
+
+    init() {
+        let center = NotificationCenter.default
+        lifecycleObservers = [AVAudioSession.interruptionNotification, AVAudioSession.routeChangeNotification].map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.isRecording || self.isStarting else { return }
+                    self.cancel()
+                }
+            }
+        }
+    }
 
     func start(existingText: String) async {
-        guard !isRecording else { return }
+        guard !isRecording, !isStarting else { return }
+        discardRecognition()
+        let requestID = UUID()
+        startRequestID = requestID
+        isStarting = true
         errorMessage = nil
+        defer {
+            if startRequestID == requestID { isStarting = false }
+        }
 
-        guard await requestSpeechAuthorization() else {
-            errorMessage = "Enable Speech Recognition for WHOX OS in Settings to transcribe audio."
+        guard await requestSpeechAuthorization(), startRequestID == requestID else {
+            if startRequestID == requestID {
+                errorMessage = "Enable Speech Recognition for WHOX OS in Settings to transcribe audio."
+            }
             return
         }
-        guard await requestMicrophoneAuthorization() else {
-            errorMessage = "Enable Microphone access for WHOX OS in Settings to record audio."
+        guard await requestMicrophoneAuthorization(), startRequestID == requestID else {
+            if startRequestID == requestID {
+                errorMessage = "Enable Microphone access for WHOX OS in Settings to record audio."
+            }
             return
         }
         guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else {
-            errorMessage = "Speech recognition is temporarily unavailable."
+            if startRequestID == requestID {
+                errorMessage = "Speech recognition is temporarily unavailable."
+            }
             return
         }
 
-        stopEngine()
         prefix = existingText.trimmingCharacters(in: .whitespacesAndNewlines)
         transcript = prefix
-
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.taskHint = .dictation
-        recognitionRequest = request
+        let speechRequest = SFSpeechAudioBufferRecognitionRequest()
+        speechRequest.shouldReportPartialResults = true
+        speechRequest.taskHint = .dictation
+        recognitionRequest = speechRequest
+        let recognitionID = UUID()
+        activeRecognitionID = recognitionID
 
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
+            guard startRequestID == requestID else {
+                discardRecognition()
+                return
+            }
 
             let input = audioEngine.inputNode
             let format = input.outputFormat(forBus: 0)
             guard format.sampleRate > 0, format.channelCount > 0 else {
                 throw VoiceInputError.noAudioInput
             }
-            input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak self, request] buffer, _ in
-                request.append(buffer)
+            input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak self, speechRequest] buffer, _ in
+                speechRequest.append(buffer)
                 let visualLevel = Self.meterLevel(buffer)
                 Task { @MainActor [weak self] in
+                    guard self?.activeRecognitionID == recognitionID else { return }
                     self?.level = visualLevel
                 }
             }
@@ -64,12 +99,13 @@ final class VoiceInputService {
             audioEngine.prepare()
             try audioEngine.start()
             isRecording = true
+            isStarting = false
 
-            recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            recognitionTask = recognizer.recognitionTask(with: speechRequest) { [weak self] result, error in
                 let text = result?.bestTranscription.formattedString
                 let isFinal = result?.isFinal == true
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.activeRecognitionID == recognitionID else { return }
                     if let text {
                         self.transcript = self.prefix.isEmpty ? text : self.prefix + (text.isEmpty ? "" : " " + text)
                     }
@@ -77,31 +113,68 @@ final class VoiceInputService {
                         self.errorMessage = error.localizedDescription
                     }
                     if isFinal || error != nil {
-                        self.stop()
+                        self.finishRecognition(recognitionID, cancel: false)
                     }
                 }
             }
         } catch {
-            stopEngine()
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? "The microphone could not start."
+            discardRecognition()
+            if startRequestID == requestID {
+                errorMessage = (error as? LocalizedError)?.errorDescription ?? "The microphone could not start."
+            }
         }
     }
 
+    /// Stops capture but leaves the recognition task alive briefly so its final result is delivered.
     func stop() {
-        guard isRecording || recognitionRequest != nil else { return }
+        startRequestID = UUID()
+        isStarting = false
+        guard isRecording, let recognitionID = activeRecognitionID else { return }
         recognitionRequest?.endAudio()
-        stopEngine()
+        stopAudioCapture()
+        finalizationTask?.cancel()
+        finalizationTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.finishRecognition(recognitionID, cancel: true)
+        }
     }
 
-    private func stopEngine() {
+    /// Cancels pending authorization and active recognition without accepting late callbacks.
+    func cancel() {
+        startRequestID = UUID()
+        isStarting = false
+        discardRecognition()
+    }
+
+    private func finishRecognition(_ recognitionID: UUID, cancel: Bool) {
+        guard activeRecognitionID == recognitionID else { return }
+        finalizationTask?.cancel()
+        finalizationTask = nil
+        if cancel { recognitionTask?.cancel() }
+        recognitionTask = nil
+        recognitionRequest = nil
+        activeRecognitionID = nil
+        stopAudioCapture()
+    }
+
+    private func discardRecognition() {
+        finalizationTask?.cancel()
+        finalizationTask = nil
+        recognitionRequest?.endAudio()
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        activeRecognitionID = nil
+        stopAudioCapture()
+    }
+
+    private func stopAudioCapture() {
         if audioEngine.isRunning { audioEngine.stop() }
         if hasInputTap {
             audioEngine.inputNode.removeTap(onBus: 0)
             hasInputTap = false
         }
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest = nil
         isRecording = false
         level = 0
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

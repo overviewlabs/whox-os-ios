@@ -6,10 +6,12 @@ import WHOXCore
 
 struct ChatHomeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     let onOpenDrawer: () -> Void
     let onOpenDirectory: () -> Void
     @State private var draft = ""
     @State private var voice = VoiceInputService()
+    @State private var lastVoiceError: String?
     @State private var showingPhotoPicker = false
     @State private var showingFileImporter = false
     @State private var selectedPhotos: [PhotosPickerItem] = []
@@ -55,9 +57,18 @@ struct ChatHomeView: View {
             if voice.isRecording || !value.isEmpty { draft = value }
         }
         .onChange(of: voice.errorMessage) { _, value in
-            if let value { model.errorMessage = value }
+            if let value {
+                lastVoiceError = value
+                model.errorMessage = value
+            } else if model.errorMessage == lastVoiceError {
+                model.errorMessage = nil
+                lastVoiceError = nil
+            }
         }
-        .onDisappear { voice.stop() }
+        .onDisappear { voice.cancel() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { voice.cancel() }
+        }
         .task {
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--visual-review-composer-typed") {
@@ -72,28 +83,25 @@ struct ChatHomeView: View {
     private var topBar: some View {
         HStack(spacing: 0) {
             Button(action: onOpenDrawer) {
-                MenuGlyph()
+                ZStack {
+                    Circle().fill(WHOXTheme.surface).frame(width: 40, height: 40)
+                    Circle().stroke(WHOXTheme.border, lineWidth: 0.7).frame(width: 40, height: 40)
+                    MenuGlyph()
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .frame(width: 40, height: 40)
-            .background(WHOXTheme.surface, in: Circle())
-            .overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) }
-            .contentShape(Circle())
             .accessibilityLabel("Open navigation")
             Spacer()
-            Button {
-                composerFocused = false
-            } label: {
-                HStack(spacing: 6) {
-                    Text("Chat")
-                        .font(.system(size: 17, weight: .semibold))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(minWidth: 72, minHeight: 44)
+            HStack(spacing: 6) {
+                Text("Chat")
+                    .font(.system(size: 17, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .frame(minWidth: 72, minHeight: 44)
             .accessibilityLabel("Chat")
             Spacer()
             circleButton("sidebar.right", label: "Open folders and files", action: onOpenDirectory)
@@ -183,9 +191,9 @@ struct ChatHomeView: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
 
                 Button(action: toggleVoiceInput) {
-                    Image(systemName: voice.isRecording ? "stop.circle.fill" : "mic")
+                    Image(systemName: (voice.isRecording || voice.isStarting) ? "stop.circle.fill" : "mic")
                         .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(voice.isRecording ? .red : .primary)
+                        .foregroundStyle((voice.isRecording || voice.isStarting) ? .red : .primary)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -208,7 +216,7 @@ struct ChatHomeView: View {
         switch ComposerContract.trailingControl(
             draft: draft,
             isSending: model.isSending,
-            isRecording: voice.isRecording
+            isRecording: voice.isRecording || voice.isStarting
         ) {
         case .microphone:
             Button(action: toggleVoiceInput) {
@@ -217,6 +225,8 @@ struct ChatHomeView: View {
                     .foregroundStyle(WHOXTheme.background)
                     .frame(width: 34, height: 34)
                     .background(Color.primary, in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Start voice transcription")
@@ -226,6 +236,8 @@ struct ChatHomeView: View {
                     .foregroundStyle(WHOXTheme.background)
                     .frame(width: 34, height: 34)
                     .background(Color.primary, in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Recording. Stop transcription")
@@ -236,6 +248,8 @@ struct ChatHomeView: View {
                     .foregroundStyle(WHOXTheme.background)
                     .frame(width: 34, height: 34)
                     .background(Color.primary, in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
@@ -247,6 +261,8 @@ struct ChatHomeView: View {
                     .foregroundStyle(WHOXTheme.background)
                     .frame(width: 34, height: 34)
                     .background(Color.primary, in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop response")
@@ -259,8 +275,9 @@ struct ChatHomeView: View {
 
     private func submitOrStop() {
         if model.isSending { model.stopSending(); return }
+        if voice.isRecording { voice.stop(); return }
+        if voice.isStarting { voice.cancel(); return }
         guard canSend else { return }
-        voice.stop()
         let value = draft
         draft = ""
         model.submit(value)
@@ -269,6 +286,8 @@ struct ChatHomeView: View {
     private func toggleVoiceInput() {
         if voice.isRecording {
             voice.stop()
+        } else if voice.isStarting {
+            voice.cancel()
         } else {
             composerFocused = false
             Task { await voice.start(existingText: draft) }
@@ -389,15 +408,15 @@ struct ChatHomeView: View {
 
     private func circleButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: 40, height: 40)
-                .background(WHOXTheme.surface, in: Circle())
-                .overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) }
-                .contentShape(Circle())
+            ZStack {
+                Circle().fill(WHOXTheme.surface).frame(width: 40, height: 40)
+                Circle().stroke(WHOXTheme.border, lineWidth: 0.7).frame(width: 40, height: 40)
+                Image(systemName: icon).font(.system(size: 17, weight: .semibold))
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(width: 44, height: 44)
         .accessibilityLabel(label)
     }
 }

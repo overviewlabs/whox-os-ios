@@ -51,6 +51,7 @@ final class AppModel {
     var directoryListing: DirectoryListing?
     var isLoadingDirectory = false
     var directoryError: String?
+    var requestedDirectoryPath = ""
     var streamResponses = true {
         didSet { defaults.set(streamResponses, forKey: "whox.streamResponses") }
     }
@@ -61,6 +62,7 @@ final class AppModel {
     @ObservationIgnored private var chatTask: Task<Void, Never>?
     @ObservationIgnored private var chatOperationID: UUID?
     @ObservationIgnored private var sessionLoadID: UUID?
+    @ObservationIgnored private var directoryLoadID: UUID?
     @ObservationIgnored private var accountGeneration = 0
     @ObservationIgnored private let attachmentCache: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
@@ -470,25 +472,37 @@ final class AppModel {
         directoryListing = nil
         directoryError = nil
         isLoadingDirectory = false
+        requestedDirectoryPath = ""
+        directoryLoadID = nil
         clearPendingAttachments()
     }
 
     func loadDirectory(_ path: String = "") async {
         let generation = accountGeneration
-        guard authenticatedUser?.role == "owner" || authenticatedUser?.role == "admin" else {
+        guard authenticatedUser?.role == "owner" else {
             directoryError = "The server directory is available to owners only."
             return
         }
+        let operationID = UUID()
+        directoryLoadID = operationID
+        requestedDirectoryPath = path
         isLoadingDirectory = true
         directoryError = nil
-        defer { if generation == accountGeneration { isLoadingDirectory = false } }
+        defer {
+            if generation == accountGeneration, directoryLoadID == operationID {
+                isLoadingDirectory = false
+            }
+        }
         do {
             let listing = try await gateway.directory(path: path)
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration, directoryLoadID == operationID else { return }
             directoryListing = listing
         } catch {
-            guard generation == accountGeneration else { return }
-            directoryError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            guard generation == accountGeneration, directoryLoadID == operationID else { return }
+            handle(error)
+            if case .signedIn = authenticationState {
+                directoryError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
 
