@@ -498,9 +498,19 @@ final class AppModel {
             guard generation == accountGeneration, directoryLoadID == operationID else { return }
             directoryListing = listing
         } catch {
-            guard generation == accountGeneration, directoryLoadID == operationID else { return }
-            handle(error)
-            if case .signedIn = authenticationState {
+            let expired: Bool
+            if case AuthenticationError.sessionExpired = error { expired = true } else { expired = false }
+            switch DirectoryFailurePolicy.disposition(
+                accountIsCurrent: generation == accountGeneration,
+                requestIsCurrent: directoryLoadID == operationID,
+                authenticationExpired: expired
+            ) {
+            case .ignore:
+                return
+            case .authentication:
+                handle(error)
+            case .presentation:
+                handle(error)
                 directoryError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }

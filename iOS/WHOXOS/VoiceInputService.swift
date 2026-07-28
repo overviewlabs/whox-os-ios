@@ -8,6 +8,7 @@ import WHOXCore
 final class VoiceInputService {
     var isRecording = false
     var isStarting = false
+    var isFinalizing = false
     var transcript = ""
     var level: Double = 0
     var errorMessage: String?
@@ -24,18 +25,26 @@ final class VoiceInputService {
 
     init() {
         let center = NotificationCenter.default
-        lifecycleObservers = [AVAudioSession.interruptionNotification, AVAudioSession.routeChangeNotification].map { name in
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        lifecycleObservers = [
+            center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self, self.isRecording || self.isStarting else { return }
                     self.cancel()
                 }
-            }
-        }
+            },
+            center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+                let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue
+                guard let reason, VoiceCapturePolicy.shouldCancelForRouteChange(reasonRawValue: reason) else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.isRecording || self.isStarting else { return }
+                    self.cancel()
+                }
+            },
+        ]
     }
 
     func start(existingText: String) async {
-        guard !isRecording, !isStarting else { return }
+        guard !isRecording, !isStarting, !isFinalizing else { return }
         discardRecognition()
         let requestID = UUID()
         startRequestID = requestID
@@ -132,6 +141,7 @@ final class VoiceInputService {
         guard isRecording, let recognitionID = activeRecognitionID else { return }
         recognitionRequest?.endAudio()
         stopAudioCapture()
+        isFinalizing = true
         finalizationTask?.cancel()
         finalizationTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
@@ -155,6 +165,7 @@ final class VoiceInputService {
         recognitionTask = nil
         recognitionRequest = nil
         activeRecognitionID = nil
+        isFinalizing = false
         stopAudioCapture()
     }
 
@@ -166,6 +177,7 @@ final class VoiceInputService {
         recognitionTask = nil
         recognitionRequest = nil
         activeRecognitionID = nil
+        isFinalizing = false
         stopAudioCapture()
     }
 

@@ -16,6 +16,7 @@ struct DirectoryDrawer: View {
         }
         .background(WHOXTheme.background.ignoresSafeArea())
         .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, onClose)
         .task {
             closeFocused = true
             if model.directoryListing == nil { await model.loadDirectory() }
@@ -131,8 +132,14 @@ struct DirectoryDrawer: View {
         } else {
             entryLabel(entry)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("File, \(entry.name)")
+                .accessibilityLabel(fileAccessibilityLabel(entry))
         }
+    }
+
+    private func fileAccessibilityLabel(_ entry: DirectoryEntry) -> String {
+        guard let size = entry.size else { return "File, \(entry.name)" }
+        let formatted = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        return "File, \(entry.name), \(formatted)"
     }
 
     private func entryLabel(_ entry: DirectoryEntry) -> some View {

@@ -184,7 +184,7 @@ struct ChatHomeView: View {
                     .lineLimit(1)
                     .submitLabel(.send)
                     .onSubmit {
-                        guard canSend || model.isSending else { return }
+                        guard !voice.isFinalizing, canSend || model.isSending else { return }
                         submitOrStop()
                     }
                     .focused($composerFocused)
@@ -198,8 +198,8 @@ struct ChatHomeView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(model.isSending)
-                .accessibilityLabel(voice.isRecording ? "Stop transcription" : "Start transcription")
+                .disabled(model.isSending || voice.isFinalizing)
+                .accessibilityLabel((voice.isRecording || voice.isStarting) ? "Stop transcription" : "Start transcription")
 
                 trailingComposerControl
                     .frame(width: ComposerContract.trailingSlot, height: 44)
@@ -216,7 +216,8 @@ struct ChatHomeView: View {
         switch ComposerContract.trailingControl(
             draft: draft,
             isSending: model.isSending,
-            isRecording: voice.isRecording || voice.isStarting
+            isRecording: voice.isRecording || voice.isStarting,
+            isFinalizing: voice.isFinalizing
         ) {
         case .microphone:
             Button(action: toggleVoiceInput) {
@@ -241,6 +242,11 @@ struct ChatHomeView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Recording. Stop transcription")
+        case .finalizing:
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Finalizing transcription")
         case .send:
             Button(action: submitOrStop) {
                 Image(systemName: "arrow.up")
@@ -277,6 +283,7 @@ struct ChatHomeView: View {
         if model.isSending { model.stopSending(); return }
         if voice.isRecording { voice.stop(); return }
         if voice.isStarting { voice.cancel(); return }
+        if voice.isFinalizing { return }
         guard canSend else { return }
         let value = draft
         draft = ""
@@ -288,6 +295,8 @@ struct ChatHomeView: View {
             voice.stop()
         } else if voice.isStarting {
             voice.cancel()
+        } else if voice.isFinalizing {
+            return
         } else {
             composerFocused = false
             Task { await voice.start(existingText: draft) }
