@@ -21,6 +21,9 @@ struct RootView: View {
         if arguments.contains("--visual-review-settings") {
             _destination = State(initialValue: .settings)
         }
+        if arguments.contains("--visual-review-navigation") {
+            _openPanel = State(initialValue: .leading)
+        }
         if arguments.contains("--visual-review-directory") {
             _openPanel = State(initialValue: .trailing)
         }
