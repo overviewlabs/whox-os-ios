@@ -85,4 +85,13 @@ for appearance in light dark; do
     xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/settings-${appearance}.png"
 done
 
+# The simulator can show its one-time swipe-typing tutorial on the first focused
+# keyboard. Recapture this state after both appearance passes so the artifact
+# proves the app layout rather than a transient system onboarding sheet.
+xcrun simctl ui "$UDID" appearance light
+xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
+xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-composer-typed
+sleep 3
+xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/composer-typed-light.png"
+
 sips -g pixelWidth -g pixelHeight .build/screenshots/*.png
