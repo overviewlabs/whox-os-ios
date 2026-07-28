@@ -23,6 +23,7 @@ struct RootView: View {
             case .signedIn: authenticatedContent
             }
         }
+        .tint(WHOXTheme.action)
         .task { await model.restoreAuthenticationIfNeeded() }
     }
 

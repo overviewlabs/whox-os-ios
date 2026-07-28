@@ -7,7 +7,10 @@ enum GatewayError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidResponse: "WHOX OS returned an invalid response."
-        case .server(let code, let message): message.isEmpty ? "Gateway request failed (\(code))." : message
+        case .server(let code, let message):
+            if !message.isEmpty { message }
+            else if code == 400 { "That message could not be sent. Please try again." }
+            else { "WHOX OS request failed (\(code))." }
         }
     }
 }

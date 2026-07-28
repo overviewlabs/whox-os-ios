@@ -74,7 +74,8 @@ import Testing
     let body = try #require(request.httpBody)
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
 
-    #expect(json["message"] as? String == "Summarize these")
+    #expect(json["input"] as? String == "Summarize these")
+    #expect(json["message"] == nil)
     #expect(json["attachment_ids"] as? [String] == ["image-id", "document-id"])
     #expect(request.url?.path == "/v1/sessions/ios-main/chat/stream")
     #expect(request.value(forHTTPHeaderField: "Accept") == "text/event-stream")

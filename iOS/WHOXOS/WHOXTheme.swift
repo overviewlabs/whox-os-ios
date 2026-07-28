@@ -17,5 +17,7 @@ enum WHOXTheme {
                 : UIColor(white: 0.88, alpha: 0.78)
         }
     )
-    static let accent = Color(red: 0.42, green: 0.94, blue: 0.78)
+    /// Adaptive monochrome tint: black in Light Mode and white in Dark Mode.
+    static let action = Color.primary
+    static let accent = action
 }

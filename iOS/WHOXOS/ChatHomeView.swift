@@ -59,13 +59,6 @@ struct ChatHomeView: View {
             Image("WHOXStudioLogo").resizable().scaledToFit().frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 12))
             Text("How can I help?").font(.title2.bold()).padding(.top, 14)
             Spacer()
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 9) {
-                    suggestion("Create an image", "photo")
-                    suggestion("Write or edit", "pencil")
-                    suggestion("Look something up", "globe")
-                }.padding(.horizontal, 16)
-            }.padding(.bottom, 12)
         }
     }
 
@@ -118,27 +111,37 @@ struct ChatHomeView: View {
                         draft = "Look up and explain: "; composerFocused = true
                     }
                 } label: {
-                    Image(systemName: "plus").font(.title3).frame(width: 44, height: 44)
+                    Image(systemName: "plus")
                 }
+                .buttonStyle(.borderless)
+                .frame(width: 44, height: 44)
                 .disabled(model.isSending || model.pendingAttachments.count >= 5)
                 .accessibilityLabel("Add photos, files, or prompt actions")
 
                 TextField("Ask WHOX OS", text: $draft, axis: .vertical)
-                    .lineLimit(1...6).focused($composerFocused).padding(.vertical, 9)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .submitLabel(.send)
+                    .focused($composerFocused)
+                    .padding(.vertical, 9)
 
                 if !canSend && !model.isSending {
                     Button { composerFocused = true } label: {
-                        Image(systemName: "mic.fill").frame(width: 44, height: 44)
+                        Image(systemName: "mic.fill")
                     }
+                    .buttonStyle(.borderless)
+                    .frame(width: 44, height: 44)
                     .accessibilityLabel("Voice input")
                     .accessibilityHint("Focuses the composer so you can use iPhone dictation")
                 } else {
                     Button(action: submitOrStop) {
                         Image(systemName: model.isSending ? "stop.fill" : "arrow.up")
-                            .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 36, height: 36).background(Color.accentColor, in: Circle())
-                            .frame(width: 44, height: 44)
+                            .font(.system(size: 14, weight: .bold))
                     }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.regular)
+                    .frame(width: 44, height: 44)
                     .disabled(!model.isSending && !canSend)
                     .accessibilityLabel(model.isSending ? "Stop response" : "Send message")
                 }
@@ -177,9 +180,9 @@ struct ChatHomeView: View {
             } else {
                 Image(systemName: "doc.fill")
                     .font(.title3)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(.primary)
                     .frame(width: 42, height: 42)
-                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(attachment.name).font(.caption.weight(.medium)).lineLimit(1)
@@ -254,8 +257,14 @@ struct ChatHomeView: View {
         ][ext]
     }
 
-    private func suggestion(_ text: String, _ icon: String) -> some View { Button { draft = text + ": "; composerFocused = true } label: { Label(text, systemImage: icon).font(.subheadline).foregroundStyle(.primary).padding(.horizontal, 14).frame(minHeight: 44).background(WHOXTheme.surface, in: Capsule()).overlay { Capsule().stroke(WHOXTheme.border) } } }
-    private func circleButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View { Button(action: action) { Image(systemName: icon).frame(width: 44, height: 44).background(WHOXTheme.surface, in: Circle()).overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) } }.accessibilityLabel(label) }
+    private func circleButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: icon) }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel(label)
+    }
 }
 
 private struct MessageRow: View {
@@ -339,9 +348,9 @@ private struct HistoryAttachmentCard: View {
         HStack(spacing: 10) {
             Image(systemName: "doc.fill")
                 .font(.title3)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(.primary)
                 .frame(width: 38, height: 38)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
             VStack(alignment: .leading, spacing: 2) {
                 Text(attachment.name).font(.subheadline.weight(.medium)).lineLimit(2)
                 Text(formattedSize).font(.caption).foregroundStyle(.secondary)
