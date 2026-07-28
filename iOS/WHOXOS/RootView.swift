@@ -1,21 +1,52 @@
 import SwiftUI
 import WHOXCore
 
+enum AppDestination: Hashable {
+    case chat, library, projects, scheduled, plugins, remote, images, health, settings
+}
+
 struct RootView: View {
-    @Bindable var model: AppModel
+    @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @State private var destination: AppDestination = .chat
     @State private var openPanel: DrawerSide?
     @State private var dragSide: DrawerSide?
     @State private var dragTranslation: CGFloat = 0
-    @State private var showSettings = false
     @State private var showDebugControls = false
+
+    init() {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--visual-review-settings") {
+            _destination = State(initialValue: .settings)
+        }
+        if arguments.contains("--visual-review-directory") {
+            _openPanel = State(initialValue: .trailing)
+        }
+#endif
+    }
 
     private var panelAnimation: Animation {
         reduceMotion ? .easeOut(duration: 0.16) : .interactiveSpring(response: 0.34, dampingFraction: 0.86)
     }
 
     var body: some View {
+        Group {
+            switch model.authenticationState {
+            case .checking:
+                ZStack { WHOXTheme.background.ignoresSafeArea(); ProgressView() }
+            case .signedOut:
+                LoginView()
+            case .signedIn:
+                authenticatedContent
+            }
+        }
+        .tint(WHOXTheme.action)
+        .task { await model.restoreAuthenticationIfNeeded() }
+    }
+
+    private var authenticatedContent: some View {
         GeometryReader { geometry in
             let navigationWidth = min(geometry.size.width * 0.82, 390)
             let directoryWidth = min(geometry.size.width * 0.82, 390)
@@ -24,11 +55,8 @@ struct RootView: View {
             let overlayProgress = max(leadingProgress, trailingProgress)
 
             ZStack(alignment: .leading) {
-                ChatHomeView(
-                    model: model,
-                    onMenu: { open(.leading) },
-                    onDirectory: { openDirectory() }
-                )
+                mainContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(overlayProgress == 0)
                 .accessibilityHidden(overlayProgress > 0)
 
@@ -41,15 +69,7 @@ struct RootView: View {
                         .accessibilityAddTraits(.isButton)
                 }
 
-                NavigationDrawer(
-                    model: model,
-                    isOpen: openPanel == .leading,
-                    onClose: closePanels,
-                    onSettings: {
-                        closePanels()
-                        showSettings = true
-                    }
-                )
+                NavigationDrawer(onSelect: select)
                 .frame(width: navigationWidth)
                 .frame(maxHeight: .infinity)
                 .offset(x: -navigationWidth * (1 - leadingProgress))
@@ -70,7 +90,6 @@ struct RootView: View {
             .simultaneousGesture(panelDrag(containerWidth: geometry.size.width, leadingWidth: navigationWidth, trailingWidth: directoryWidth))
         }
         .background(WHOXTheme.background.ignoresSafeArea())
-        .sheet(isPresented: $showSettings) { SettingsView(model: model) }
         .onReceive(NotificationCenter.default.publisher(for: .whoxDebugToggleDrawer)) { _ in
 #if DEBUG
             if openPanel == .leading { closePanels() } else { open(.leading) }
@@ -91,6 +110,42 @@ struct RootView: View {
             if showDebugControls { debugControls.padding(12) }
 #endif
         }
+    }
+
+    @ViewBuilder private var mainContent: some View {
+        switch destination {
+        case .chat:
+            ChatHomeView(onOpenDrawer: { open(.leading) }, onOpenDirectory: openDirectory)
+        case .library:
+            FeatureNavigation(title: "Library", openDrawer: { open(.leading) }) { LibraryView() }
+        case .projects:
+            FeatureNavigation(title: "Projects", openDrawer: { open(.leading) }) { ProjectsView() }
+        case .scheduled:
+            FeatureNavigation(title: "Scheduled", openDrawer: { open(.leading) }) { ScheduledView() }
+        case .plugins:
+            FeatureNavigation(title: "Plugins", openDrawer: { open(.leading) }) { PluginsView() }
+        case .remote:
+            FeatureNavigation(title: "Remote", openDrawer: { open(.leading) }) { RemoteView() }
+        case .images:
+            FeatureNavigation(title: "Images", openDrawer: { open(.leading) }) { ImagesView { select(.chat) } }
+        case .health:
+            FeatureNavigation(title: "Health", openDrawer: { open(.leading) }) { HealthView() }
+        case .settings:
+            NavigationStack { SettingsView().toolbar { drawerToolbar } }
+        }
+    }
+
+    @ToolbarContentBuilder private var drawerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { open(.leading) } label: { Image(systemName: "line.3.horizontal") }
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("Open navigation")
+        }
+    }
+
+    private func select(_ value: AppDestination) {
+        destination = value
+        closePanels()
     }
 
     private func panelProgress(_ side: DrawerSide, width: CGFloat) -> CGFloat {
@@ -198,6 +253,32 @@ struct RootView: View {
         .accessibilityIdentifier("debug-drawer-controls")
     }
 #endif
+}
+
+private struct FeatureNavigation<Content: View>: View {
+    let title: String
+    let openDrawer: () -> Void
+    let content: Content
+
+    init(title: String, openDrawer: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.openDrawer = openDrawer
+        self.content = content()
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle(title)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(action: openDrawer) { Image(systemName: "line.3.horizontal") }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .accessibilityLabel("Open navigation")
+                    }
+                }
+        }
+    }
 }
 
 private extension Notification.Name {
