@@ -17,7 +17,7 @@ struct DirectoryDrawer: View {
             pathBar
 
             ZStack {
-                if model.isDirectoryLoading && model.directoryListing == nil {
+                if model.isLoadingDirectory && model.directoryListing == nil {
                     ProgressView("Loading root…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let error = model.directoryError, model.directoryListing == nil {
@@ -32,7 +32,7 @@ struct DirectoryDrawer: View {
                         .transition(.opacity.combined(with: .move(edge: .trailing)))
                 }
 
-                if model.isDirectoryLoading && model.directoryListing != nil {
+                if model.isLoadingDirectory && model.directoryListing != nil {
                     ProgressView()
                         .padding(12)
                         .background(.regularMaterial, in: Circle())
@@ -92,7 +92,7 @@ struct DirectoryDrawer: View {
                     .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
-            .disabled((model.directoryListing?.path ?? "").isEmpty || model.isDirectoryLoading)
+            .disabled((model.directoryListing?.path ?? "").isEmpty || model.isLoadingDirectory)
             .accessibilityLabel("Back one folder")
 
             Image(systemName: "folder.fill").foregroundStyle(.secondary)
@@ -109,7 +109,7 @@ struct DirectoryDrawer: View {
                     .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
-            .disabled(model.isDirectoryLoading)
+            .disabled(model.isLoadingDirectory)
             .accessibilityLabel("Refresh directory")
         }
         .padding(.horizontal, 18)
@@ -139,12 +139,6 @@ struct DirectoryDrawer: View {
                     }
                 }
 
-                if listing.truncated {
-                    Label("Showing the first 500 items", systemImage: "ellipsis.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(18)
-                }
             }
         }
         .scrollIndicators(.visible)
@@ -169,7 +163,7 @@ struct DirectoryDrawer: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     if !entry.isDirectory, let size = entry.size {
-                        Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
