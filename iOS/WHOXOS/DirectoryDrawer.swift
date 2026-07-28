@@ -110,9 +110,9 @@ struct DirectoryDrawer: View {
             if entry.isDirectory { Task { await model.loadDirectory(entry.path) } }
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: entry.isDirectory ? "folder.fill" : fileIcon(entry.name))
-                    .font(.system(size: 20))
-                    .foregroundStyle(entry.isDirectory ? Color.accentColor : .secondary)
+                Image(systemName: entry.isDirectory ? "folder.fill" : "doc")
+                    .font(.system(size: 18))
+                    .foregroundStyle(entry.isDirectory ? Color.primary : Color.secondary)
                     .frame(width: 32, height: 44)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.name)

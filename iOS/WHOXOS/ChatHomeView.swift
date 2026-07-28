@@ -20,7 +20,15 @@ struct ChatHomeView: View {
             WHOXTheme.background.ignoresSafeArea()
             VStack(spacing: 0) {
                 topBar
-                if model.messages.isEmpty { emptyState } else { transcript }
+                if model.messages.isEmpty {
+                    if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        emptyState
+                    } else {
+                        Color.clear
+                    }
+                } else {
+                    transcript
+                }
                 if let error = model.errorMessage { Text(error).font(.footnote).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 6) }
                 composer.padding(.bottom, 8)
             }
@@ -63,7 +71,15 @@ struct ChatHomeView: View {
 
     private var topBar: some View {
         HStack(spacing: 0) {
-            circleButton("line.3.horizontal", label: "Open navigation", action: onOpenDrawer)
+            Button(action: onOpenDrawer) {
+                MenuGlyph()
+            }
+            .buttonStyle(.plain)
+            .frame(width: 40, height: 40)
+            .background(WHOXTheme.surface, in: Circle())
+            .overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) }
+            .contentShape(Circle())
+            .accessibilityLabel("Open navigation")
             Spacer()
             Button {
                 composerFocused = false
@@ -89,14 +105,14 @@ struct ChatHomeView: View {
     private var emptyState: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 0) {
                 suggestion("photo", "Create an image", prompt: "Create an image: ")
                 suggestion("pencil", "Write or edit", prompt: "Help me write or edit: ")
                 suggestion("globe", "Search the web", prompt: "Search the web for: ")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 24)
-            .padding(.bottom, 24)
+            .padding(.bottom, 10)
         }
     }
 
@@ -146,7 +162,7 @@ struct ChatHomeView: View {
                     }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 20, weight: .regular))
+                        .font(.system(size: 18, weight: .regular))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -156,7 +172,8 @@ struct ChatHomeView: View {
 
                 TextField("Ask WHOX OS", text: $draft)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 16))
+                    .font(.system(size: 15))
+                    .lineLimit(1)
                     .submitLabel(.send)
                     .onSubmit {
                         guard canSend || model.isSending else { return }
@@ -167,7 +184,7 @@ struct ChatHomeView: View {
 
                 Button(action: toggleVoiceInput) {
                     Image(systemName: voice.isRecording ? "stop.circle.fill" : "mic")
-                        .font(.system(size: 19, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(voice.isRecording ? .red : .primary)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
@@ -198,7 +215,7 @@ struct ChatHomeView: View {
                 Image(systemName: "waveform")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(WHOXTheme.background)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
                     .background(Color.primary, in: Circle())
             }
             .buttonStyle(.plain)
@@ -207,7 +224,7 @@ struct ChatHomeView: View {
             Button(action: toggleVoiceInput) {
                 LiveAudioBars(level: voice.level)
                     .foregroundStyle(WHOXTheme.background)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
                     .background(Color.primary, in: Circle())
             }
             .buttonStyle(.plain)
@@ -217,7 +234,7 @@ struct ChatHomeView: View {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(WHOXTheme.background)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
                     .background(Color.primary, in: Circle())
             }
             .buttonStyle(.plain)
@@ -228,7 +245,7 @@ struct ChatHomeView: View {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(WHOXTheme.background)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
                     .background(Color.primary, in: Circle())
             }
             .buttonStyle(.plain)
@@ -263,12 +280,12 @@ struct ChatHomeView: View {
             draft = prompt
             composerFocused = true
         } label: {
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .font(.system(size: 18, weight: .regular))
-                    .frame(width: 24, height: 24)
+                    .font(.system(size: 16, weight: .regular))
+                    .frame(width: 18, height: 18)
                 Text(title)
-                    .font(.system(size: 16))
+                    .font(.system(size: 15))
                 Spacer()
             }
             .frame(minHeight: 40)
@@ -382,6 +399,16 @@ struct ChatHomeView: View {
         .buttonStyle(.plain)
         .frame(width: 44, height: 44)
         .accessibilityLabel(label)
+    }
+}
+
+private struct MenuGlyph: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Capsule().frame(width: 20, height: 1.5)
+            Capsule().frame(width: 12, height: 1.5)
+        }
+        .frame(width: 22, height: 22, alignment: .center)
     }
 }
 
