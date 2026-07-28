@@ -61,7 +61,7 @@ struct RootView: View {
 
             ZStack {
                 HStack(spacing: 0) {
-                    NavigationDrawer(onSelect: select)
+                    NavigationDrawer(onSelect: select, onClose: closePanels)
                         .frame(width: navigationWidth)
                         .frame(maxHeight: .infinity)
                         .allowsHitTesting(leadingProgress > 0.01)
@@ -70,14 +70,16 @@ struct RootView: View {
                     Spacer(minLength: 0)
                 }
 
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    DirectoryDrawer(model: model, onClose: closePanels)
-                        .frame(width: directoryWidth)
-                        .frame(maxHeight: .infinity)
-                        .allowsHitTesting(trailingProgress > 0.01)
-                        .accessibilityHidden(trailingProgress == 0)
-                        .accessibilityAddTraits(.isModal)
+                if DrawerAccessContract.canOpen(.trailing, role: model.authenticatedUser?.role) {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        DirectoryDrawer(model: model, onClose: closePanels)
+                            .frame(width: directoryWidth)
+                            .frame(maxHeight: .infinity)
+                            .allowsHitTesting(trailingProgress > 0.01)
+                            .accessibilityHidden(trailingProgress == 0)
+                            .accessibilityAddTraits(.isModal)
+                    }
                 }
 
                 mainContent
@@ -191,10 +193,13 @@ struct RootView: View {
             .onChanged { value in
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 if dragSide == nil {
-                    dragSide = openPanel ?? DrawerGestureContract.openingSide(
+                    let candidate = openPanel ?? DrawerGestureContract.openingSide(
                         startX: value.startLocation.x,
                         containerWidth: containerWidth
                     )
+                    dragSide = candidate.flatMap {
+                        DrawerAccessContract.canOpen($0, role: model.authenticatedUser?.role) ? $0 : nil
+                    }
                     if dragSide != nil { dismissKeyboard() }
                 }
                 guard let side = dragSide else { return }
@@ -242,12 +247,14 @@ struct RootView: View {
     }
 
     private func open(_ side: DrawerSide) {
+        guard DrawerAccessContract.canOpen(side, role: model.authenticatedUser?.role) else { return }
         dismissKeyboard()
         withAnimation(panelAnimation) {
             dragSide = nil
             dragTranslation = 0
             openPanel = side
         }
+        UIAccessibility.post(notification: .screenChanged, argument: nil)
     }
 
     private func dismissKeyboard() {
@@ -260,8 +267,8 @@ struct RootView: View {
     }
 
     private func openDirectory() {
-        guard model.authenticatedUser?.role == "owner" else { return }
         open(.trailing)
+        guard openPanel == .trailing else { return }
         Task { await model.loadDirectory(model.directoryListing?.path ?? "") }
     }
 

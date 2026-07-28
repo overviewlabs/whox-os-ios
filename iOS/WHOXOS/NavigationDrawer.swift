@@ -4,6 +4,7 @@ import WHOXCore
 struct NavigationDrawer: View {
     @Environment(AppModel.self) private var model
     let onSelect: (AppDestination) -> Void
+    let onClose: () -> Void
 
     @State private var query = ""
     @State private var showsSearch = false
@@ -62,6 +63,7 @@ struct NavigationDrawer: View {
         .padding(.top, 14)
         .padding(.bottom, 8)
         .background(WHOXTheme.background.ignoresSafeArea())
+        .accessibilityAction(.escape, onClose)
         .alert(
             "Rename chat",
             isPresented: Binding(
@@ -85,6 +87,15 @@ struct NavigationDrawer: View {
             Text("WHOX OS")
                 .font(.system(size: 25, weight: .semibold))
             Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 46, height: 46)
+                    .background(Color.primary.opacity(0.08), in: Circle())
+                    .overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close navigation")
             Button {
                 withAnimation(.snappy(duration: 0.22)) {
                     showsSearch.toggle()

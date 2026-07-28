@@ -33,6 +33,12 @@ public enum DrawerGestureContract {
     }
 }
 
+public enum DrawerAccessContract {
+    public static func canOpen(_ side: DrawerSide, role: String?) -> Bool {
+        side == .leading || role == "owner"
+    }
+}
+
 public enum DirectoryPathContract {
     public static func displayPath(_ relativePath: String) -> String {
         relativePath.isEmpty ? "/" : "/" + relativePath

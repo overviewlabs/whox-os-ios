@@ -21,6 +21,14 @@ import Foundation
     #expect(DrawerGestureContract.shouldCommit(translation: -130, predictedTranslation: -150, width: 300))
 }
 
+@Test func ownerOnlyDirectoryDrawerCannotOpenForOtherRoles() {
+    #expect(DrawerAccessContract.canOpen(.leading, role: nil))
+    #expect(DrawerAccessContract.canOpen(.leading, role: "member"))
+    #expect(DrawerAccessContract.canOpen(.trailing, role: "owner"))
+    #expect(DrawerAccessContract.canOpen(.trailing, role: "member") == false)
+    #expect(DrawerAccessContract.canOpen(.trailing, role: nil) == false)
+}
+
 @Test func trueRootPresentationUsesSlash() {
     #expect(DirectoryPathContract.displayPath("") == "/")
     #expect(DirectoryPathContract.displayPath("WHOX OS/Apple Developer") == "/WHOX OS/Apple Developer")

@@ -10,6 +10,7 @@ struct DirectoryDrawer: View {
     @State private var preview: DirectoryPreview?
     @State private var previewFolderURL: URL?
     @State private var loadingFilePath: String?
+    @State private var previewTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,7 +43,13 @@ struct DirectoryDrawer: View {
         }
         .background(WHOXTheme.background)
         .task {
+            removeStalePreviews()
             if model.directoryListing == nil { await model.loadDirectory("") }
+        }
+        .onDisappear {
+            previewTask?.cancel()
+            previewTask = nil
+            removePreview()
         }
         .sheet(item: $preview, onDismiss: removePreview) { item in
             DirectoryQuickLook(url: item.url)
@@ -228,13 +235,11 @@ struct DirectoryDrawer: View {
     private func previewFile(_ entry: DirectoryEntry) {
         guard loadingFilePath == nil else { return }
         loadingFilePath = entry.path
-        Task {
+        previewTask = Task {
             defer { loadingFilePath = nil }
-            guard let data = await model.directoryFileData(entry) else { return }
+            guard let data = await model.directoryFileData(entry), !Task.isCancelled else { return }
             do {
-                let folder = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("WHOXDirectoryPreviews", isDirectory: true)
-                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                let folder = previewRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
                 try FileManager.default.createDirectory(
                     at: folder,
                     withIntermediateDirectories: true,
@@ -248,6 +253,10 @@ struct DirectoryDrawer: View {
                     throw CocoaError(.fileWriteInvalidFileName)
                 }
                 try data.write(to: url, options: [.atomic, .completeFileProtection])
+                guard !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: folder)
+                    return
+                }
                 previewFolderURL = folder
                 preview = DirectoryPreview(url: url)
             } catch {
@@ -268,10 +277,18 @@ struct DirectoryDrawer: View {
     }
 
     private func removePreview() {
-        guard let folder = previewFolderURL else { return }
-        try? FileManager.default.removeItem(at: folder)
+        if let folder = previewFolderURL { try? FileManager.default.removeItem(at: folder) }
         previewFolderURL = nil
         preview = nil
+    }
+
+    private var previewRoot: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("WHOXDirectoryPreviews", isDirectory: true)
+    }
+
+    private func removeStalePreviews() {
+        try? FileManager.default.removeItem(at: previewRoot)
     }
 
     private func fileIcon(_ name: String) -> String {

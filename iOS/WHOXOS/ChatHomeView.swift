@@ -118,7 +118,11 @@ struct ChatHomeView: View {
             .frame(minWidth: 72, minHeight: 44)
             .accessibilityLabel("Chat")
             Spacer()
-            circleButton("sidebar.right", label: "Open folders and files", action: onOpenDirectory)
+            if DrawerAccessContract.canOpen(.trailing, role: model.authenticatedUser?.role) {
+                circleButton("sidebar.right", label: "Open folders and files", action: onOpenDirectory)
+            } else {
+                Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 18)
         .frame(height: 64)
