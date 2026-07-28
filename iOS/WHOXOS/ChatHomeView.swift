@@ -71,7 +71,13 @@ struct ChatHomeView: View {
         }
         .task {
 #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--visual-review-composer-typed") {
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains(where: { $0.hasPrefix("--visual-review-") }) {
+                model.errorMessage = nil
+                try? await Task.sleep(for: .milliseconds(500))
+                model.errorMessage = nil
+            }
+            if arguments.contains("--visual-review-composer-typed") {
                 draft = "Hi"
                 try? await Task.sleep(for: .milliseconds(350))
                 composerFocused = true

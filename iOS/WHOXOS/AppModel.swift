@@ -84,6 +84,11 @@ final class AppModel {
             connection = .connected(serverName: "WHOX OS")
             sessions = [.init(id: "visual-review", title: "Chat")]
             selectedSessionID = "visual-review"
+            if arguments.contains("--visual-review-bubble") {
+                messages = [
+                    .init(id: "visual-short-user", role: .user, content: "Hi")
+                ]
+            }
             if arguments.contains("--visual-review-chat") {
                 messages = [
                     .init(
