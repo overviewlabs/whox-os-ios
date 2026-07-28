@@ -16,7 +16,7 @@ struct ChatHomeView: View {
     @State private var showingFileImporter = false
     @State private var showingLinks = false
     @State private var linkInput = ""
-    @State private var pendingLinks: [String] = []
+    @State private var linkError: String?
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @FocusState private var composerFocused: Bool
 
@@ -88,7 +88,7 @@ struct ChatHomeView: View {
             }
             if arguments.contains("--visual-review-composer-links") {
                 draft = "Compare these sources"
-                pendingLinks = ["https://whox.ai/docs", "https://example.com/reference"]
+                model.pendingLinks = ["https://whox.ai/docs", "https://example.com/reference"]
             }
 #endif
         }
@@ -161,10 +161,10 @@ struct ChatHomeView: View {
 
     private var composer: some View {
         VStack(spacing: 6) {
-            if !model.pendingAttachments.isEmpty || !pendingLinks.isEmpty {
+            if !model.pendingAttachments.isEmpty || !model.pendingLinks.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(pendingLinks, id: \.self) { link in
+                        ForEach(model.pendingLinks, id: \.self) { link in
                             linkChip(link)
                         }
                         ForEach(model.pendingAttachments) { attachment in
@@ -179,7 +179,8 @@ struct ChatHomeView: View {
             HStack(spacing: 0) {
                 Menu {
                     Button("Links", systemImage: "link") {
-                        linkInput = pendingLinks.joined(separator: "\n")
+                        linkInput = model.pendingLinks.joined(separator: "\n")
+                        linkError = nil
                         showingLinks = true
                     }
                     Button("Files", systemImage: "folder") { showingFileImporter = true }
@@ -233,6 +234,7 @@ struct ChatHomeView: View {
     @ViewBuilder private var trailingComposerControl: some View {
         switch ComposerContract.trailingControl(
             draft: draft,
+            hasReferences: !model.pendingLinks.isEmpty,
             isSending: model.isSending,
             isRecording: voice.isRecording || voice.isStarting,
             isFinalizing: voice.isFinalizing
@@ -295,7 +297,7 @@ struct ChatHomeView: View {
 
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !model.pendingAttachments.isEmpty || !pendingLinks.isEmpty
+            !model.pendingAttachments.isEmpty || !model.pendingLinks.isEmpty
     }
 
     private func submitOrStop() {
@@ -304,9 +306,9 @@ struct ChatHomeView: View {
         if voice.isStarting { voice.cancel(); return }
         if voice.isFinalizing { return }
         guard canSend else { return }
-        let value = LinkReferenceContract.messageText(draft: draft, links: pendingLinks)
+        let value = LinkReferenceContract.messageText(draft: draft, links: model.pendingLinks)
         draft = ""
-        pendingLinks = []
+        model.pendingLinks = []
         model.submit(value)
     }
 
@@ -324,6 +326,13 @@ struct ChatHomeView: View {
                     .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                     .overlay { RoundedRectangle(cornerRadius: 14).stroke(WHOXTheme.border) }
                     .accessibilityLabel("Reference links, one per line")
+                    .onChange(of: linkInput) { _, _ in linkError = nil }
+                if let linkError {
+                    Text(linkError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .accessibilityLabel("Link error: \(linkError)")
+                }
             }
             .padding(18)
             .navigationTitle("Links")
@@ -336,11 +345,11 @@ struct ChatHomeView: View {
                     Button("Add") {
                         let links = LinkReferenceContract.validLinks(from: linkInput)
                         if links.isEmpty && !linkInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            model.errorMessage = "Enter at least one valid http or https link."
+                            linkError = "Enter at least one valid http or https link."
                             return
                         }
-                        pendingLinks = links
-                        model.errorMessage = nil
+                        model.pendingLinks = links
+                        linkError = nil
                         showingLinks = false
                     }
                 }
@@ -429,7 +438,7 @@ struct ChatHomeView: View {
             Text(URL(string: link)?.host ?? link)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
-            Button { pendingLinks.removeAll { $0 == link } } label: {
+            Button { model.pendingLinks.removeAll { $0 == link } } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
                     .frame(width: 32, height: 44)

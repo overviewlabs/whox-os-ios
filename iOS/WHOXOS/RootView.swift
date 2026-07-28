@@ -166,6 +166,7 @@ struct RootView: View {
     }
 
     private func select(_ value: AppDestination) {
+        dismissKeyboard()
         destination = value
         closePanels()
     }

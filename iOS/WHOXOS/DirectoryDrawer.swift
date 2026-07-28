@@ -146,8 +146,8 @@ struct DirectoryDrawer: View {
         .scrollIndicators(.visible)
     }
 
-    private func directoryRow(_ entry: DirectoryEntry) -> some View {
-        Button {
+    @ViewBuilder private func directoryRow(_ entry: DirectoryEntry) -> some View {
+        let row = Button {
             if entry.isDirectory {
                 navigate(to: entry.path)
             } else {
@@ -202,8 +202,11 @@ struct DirectoryDrawer: View {
         }
         .accessibilityLabel(entryAccessibilityLabel(entry))
         .accessibilityHint(entry.isDirectory ? "Opens this folder" : "Opens a read-only preview")
-        .accessibilityAction(named: "Add to Chat") {
-            if !entry.isDirectory { addToChat(entry) }
+
+        if entry.isDirectory {
+            row
+        } else {
+            row.accessibilityAction(named: "Add to Chat") { addToChat(entry) }
         }
     }
 

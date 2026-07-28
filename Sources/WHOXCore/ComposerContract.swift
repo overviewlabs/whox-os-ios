@@ -14,6 +14,7 @@ public enum ComposerContract {
 
     public static func trailingControl(
         draft: String,
+        hasReferences: Bool = false,
         isSending: Bool,
         isRecording: Bool,
         isFinalizing: Bool = false
@@ -21,7 +22,8 @@ public enum ComposerContract {
         if isSending { return .stop }
         if isRecording { return .liveAudio }
         if isFinalizing { return .finalizing }
-        return draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .microphone : .send
+        let hasText = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasText || hasReferences ? .send : .microphone
     }
 }
 

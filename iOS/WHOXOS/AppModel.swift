@@ -48,6 +48,7 @@ final class AppModel {
     var activeRunID: String?
     var pendingApproval: RunEvent?
     var pendingAttachments: [PendingChatAttachment] = []
+    var pendingLinks: [String] = []
     var directoryListing: DirectoryListing?
     var isLoadingDirectory = false
     var directoryError: String?
@@ -187,7 +188,7 @@ final class AppModel {
 
     func selectSession(_ id: String?) async {
         discardChat()
-        clearPendingAttachments()
+        clearPendingComposerItems()
         let requestID = UUID()
         sessionLoadID = requestID
         selectedSessionID = id
@@ -208,7 +209,7 @@ final class AppModel {
 
     func newChat() {
         discardChat()
-        clearPendingAttachments()
+        clearPendingComposerItems()
         sessionLoadID = UUID()
         selectedSessionID = nil
         messages = []
@@ -281,7 +282,7 @@ final class AppModel {
                 }
                 return ChatAttachment(id: id, name: $0.name, mimeType: $0.mimeType, size: $0.size)
             }
-            clearPendingAttachments()
+            clearPendingComposerItems()
             messages.append(ChatMessage(
                 id: "local-user-\(UUID())",
                 role: .user,
@@ -487,7 +488,7 @@ final class AppModel {
         isLoadingDirectory = false
         requestedDirectoryPath = ""
         directoryLoadID = nil
-        clearPendingAttachments()
+        clearPendingComposerItems()
     }
 
     func loadDirectory(_ path: String = "") async {
@@ -599,7 +600,10 @@ final class AppModel {
         }
     }
 
-    private func clearPendingAttachments() { pendingAttachments = [] }
+    private func clearPendingComposerItems() {
+        pendingAttachments = []
+        pendingLinks = []
+    }
 
     private func presentedMessage(_ message: ChatMessage) -> ChatMessage? {
         guard ChatPresentation.isVisible(message.role) else { return nil }
