@@ -516,6 +516,54 @@ final class AppModel {
         }
     }
 
+    func directoryFileData(_ entry: DirectoryEntry) async -> Data? {
+        let generation = accountGeneration
+        guard authenticatedUser?.role == "owner", !entry.isDirectory else { return nil }
+        do {
+            let data = try await gateway.directoryFile(path: entry.path)
+            guard generation == accountGeneration, data.count <= 20 * 1024 * 1024 else { return nil }
+            return data
+        } catch {
+            guard generation == accountGeneration else { return nil }
+            handle(error)
+            directoryError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return nil
+        }
+    }
+
+    func addDirectoryAttachment(_ entry: DirectoryEntry) async -> Bool {
+        guard pendingAttachments.count < 5 else {
+            errorMessage = "You can attach up to 5 files per message."
+            return false
+        }
+        guard let data = await directoryFileData(entry),
+              let mimeType = directoryAttachmentMIMEType(name: entry.name, data: data) else {
+            if errorMessage == nil { errorMessage = "That server file type cannot be added to chat." }
+            return false
+        }
+        let originalCount = pendingAttachments.count
+        addAttachment(name: entry.name, mimeType: mimeType, data: data)
+        return pendingAttachments.count == originalCount + 1
+    }
+
+    private func directoryAttachmentMIMEType(name: String, data: Data) -> String? {
+        let ext = (name as NSString).pathExtension.lowercased()
+        let known = [
+            "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "gif": "image/gif", "webp": "image/webp", "pdf": "application/pdf",
+            "txt": "text/plain", "md": "text/markdown", "csv": "text/csv",
+            "json": "application/json", "rtf": "application/rtf",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "swift": "text/plain", "py": "text/plain", "js": "text/plain",
+            "ts": "text/plain", "html": "text/plain", "css": "text/plain",
+            "yaml": "text/plain", "yml": "text/plain", "toml": "text/plain"
+        ]
+        if let mime = known[ext] { return mime }
+        return nil
+    }
+
     func attachmentData(_ attachment: ChatAttachment) async -> Data? {
         let generation = accountGeneration
         guard let userID = authenticatedUser?.id else { return nil }

@@ -121,6 +121,20 @@ import Testing
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer mobile-access-token")
 }
 
+@Test func buildsAuthenticatedReadOnlyDirectoryFileRequest() throws {
+    let factory = WHOXRequestFactory(
+        baseURL: URL(string: "https://mobile-api.whox.ai")!,
+        accessToken: "mobile-access-token"
+    )
+
+    let request = try factory.directoryFile(path: "etc/hosts")
+
+    #expect(request.httpMethod == "GET")
+    #expect(request.url?.path == "/v1/files/content")
+    #expect(request.url?.query == "path=etc/hosts")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer mobile-access-token")
+}
+
 @Test func decodesDirectoryListingContract() throws {
     let data = Data(#"{"object":"directory","path":"Apple Developer","parent":"","data":[{"name":"projects","path":"Apple Developer/projects","isDirectory":true,"size":null,"modifiedAt":123.0}]}"#.utf8)
 

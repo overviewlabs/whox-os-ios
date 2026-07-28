@@ -1,185 +1,296 @@
+import QuickLook
 import SwiftUI
+import UIKit
 import WHOXCore
 
 struct DirectoryDrawer: View {
-    @Environment(AppModel.self) private var model
-    @AccessibilityFocusState private var closeFocused: Bool
+    @Bindable var model: AppModel
     let onClose: () -> Void
+
+    @State private var preview: DirectoryPreview?
+    @State private var previewFolderURL: URL?
+    @State private var loadingFilePath: String?
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
-            breadcrumb
-            Divider()
-            content
+            pathBar
+
+            ZStack {
+                if model.isDirectoryLoading && model.directoryListing == nil {
+                    ProgressView("Loading root…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = model.directoryError, model.directoryListing == nil {
+                    ContentUnavailableView(
+                        "Directory unavailable",
+                        systemImage: "externaldrive.badge.exclamationmark",
+                        description: Text(error)
+                    )
+                } else if let listing = model.directoryListing {
+                    directoryList(listing)
+                        .id(listing.path)
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                }
+
+                if model.isDirectoryLoading && model.directoryListing != nil {
+                    ProgressView()
+                        .padding(12)
+                        .background(.regularMaterial, in: Circle())
+                        .accessibilityLabel("Loading directory")
+                }
+            }
         }
-        .background(WHOXTheme.background.ignoresSafeArea())
-        .accessibilityAddTraits(.isModal)
-        .accessibilityAction(.escape, onClose)
+        .background(Color(uiColor: .secondarySystemBackground))
         .task {
-            closeFocused = true
-            if model.directoryListing == nil { await model.loadDirectory() }
+            if model.directoryListing == nil { await model.loadDirectory("") }
         }
+        .sheet(item: $preview, onDismiss: removePreview) { item in
+            DirectoryQuickLook(url: item.url)
+                .ignoresSafeArea()
+        }
+        .accessibilityAction(.escape, onClose)
     }
 
     private var header: some View {
         HStack(spacing: 12) {
             Image(systemName: "externaldrive.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: 40, height: 40)
-                .background(WHOXTheme.surface, in: Circle())
+                .font(.title3.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+
             VStack(alignment: .leading, spacing: 2) {
                 Text("WHOX OS").font(.headline)
-                Text("Folders and files").font(.caption).foregroundStyle(.secondary)
+                Text("True-root files · read only")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+
             Spacer()
+
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .frame(width: 44, height: 44)
-                    .background(WHOXTheme.surface, in: Circle())
-                    .contentShape(Rectangle())
+                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Close file browser")
-            .accessibilityFocused($closeFocused)
+            .accessibilityLabel("Close directory")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
     }
 
-    private var breadcrumb: some View {
-        HStack(spacing: 8) {
-            if let parent = requestedParent {
-                Button {
-                    Task { await model.loadDirectory(parent) }
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+    private var pathBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                if let parent = model.directoryListing?.parent {
+                    navigate(to: parent)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Parent folder")
+            } label: {
+                Image(systemName: "chevron.left")
+                    .frame(width: 34, height: 34)
             }
+            .buttonStyle(.plain)
+            .disabled((model.directoryListing?.path ?? "").isEmpty || model.isDirectoryLoading)
+            .accessibilityLabel("Back one folder")
+
             Image(systemName: "folder.fill").foregroundStyle(.secondary)
-            Text(displayPath)
-                .font(.subheadline.weight(.medium))
+            Text(DirectoryPathContract.displayPath(model.directoryListing?.path ?? ""))
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer()
+                .accessibilityLabel("Current directory \(DirectoryPathContract.displayPath(model.directoryListing?.path ?? ""))")
+            Spacer(minLength: 4)
             Button {
-                Task { await model.loadDirectory(model.requestedDirectoryPath) }
+                Task { await model.loadDirectory(model.directoryListing?.path ?? "") }
             } label: {
                 Image(systemName: "arrow.clockwise")
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                    .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
+            .disabled(model.isDirectoryLoading)
             .accessibilityLabel("Refresh directory")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(Color(uiColor: .tertiarySystemFill))
+        .overlay(alignment: .bottom) { Divider() }
     }
 
-    @ViewBuilder private var content: some View {
-        if model.isLoadingDirectory, model.directoryListing == nil {
-            Spacer()
-            ProgressView("Loading directory…")
-            Spacer()
-        } else if let error = model.directoryError {
-            Spacer()
-            VStack(spacing: 16) {
-                ContentUnavailableView("Directory unavailable", systemImage: "folder.badge.questionmark", description: Text(error))
-                Button("Try Again") {
-                    Task { await model.loadDirectory(model.requestedDirectoryPath) }
+    private func directoryList(_ listing: DirectoryListing) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                if let error = model.directoryError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
                 }
-                .frame(minWidth: 44, minHeight: 44)
-            }
-            Spacer()
-        } else if let listing = model.directoryListing {
-            if listing.data.isEmpty {
-                Spacer()
-                ContentUnavailableView("Empty folder", systemImage: "folder")
-                Spacer()
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(listing.data) { entry in
-                            entryRow(entry)
-                            Divider().padding(.leading, 62)
-                        }
+
+                if listing.data.isEmpty {
+                    ContentUnavailableView("Empty folder", systemImage: "folder")
+                        .padding(.top, 72)
+                } else {
+                    ForEach(Array(listing.data.enumerated()), id: \.element.id) { index, entry in
+                        directoryRow(entry)
+                        if index < listing.data.count - 1 { Divider().padding(.leading, 70) }
                     }
                 }
-                .refreshable { await model.loadDirectory(model.requestedDirectoryPath) }
-            }
-        } else {
-            Spacer()
-            ProgressView()
-            Spacer()
-        }
-    }
 
-    @ViewBuilder private func entryRow(_ entry: DirectoryEntry) -> some View {
-        if entry.isDirectory {
-            Button {
-                Task { await model.loadDirectory(entry.path) }
-            } label: {
-                entryLabel(entry)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Folder, \(entry.name)")
-        } else {
-            entryLabel(entry)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(fileAccessibilityLabel(entry))
-        }
-    }
-
-    private func fileAccessibilityLabel(_ entry: DirectoryEntry) -> String {
-        guard let size = entry.size else { return "File, \(entry.name)" }
-        let formatted = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-        return "File, \(entry.name), \(formatted)"
-    }
-
-    private func entryLabel(_ entry: DirectoryEntry) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: entry.isDirectory ? "folder.fill" : "doc")
-                .font(.system(size: 18))
-                .foregroundStyle(entry.isDirectory ? Color.primary : Color.secondary)
-                .frame(width: 32, height: 44)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.name)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                if !entry.isDirectory, let size = entry.size {
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                if listing.truncated {
+                    Label("Showing the first 500 items", systemImage: "ellipsis.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .padding(18)
                 }
             }
-            Spacer(minLength: 8)
+        }
+        .scrollIndicators(.visible)
+    }
+
+    private func directoryRow(_ entry: DirectoryEntry) -> some View {
+        Button {
             if entry.isDirectory {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                navigate(to: entry.path)
+            } else {
+                previewFile(entry)
+            }
+        } label: {
+            HStack(spacing: 15) {
+                Image(systemName: entry.isDirectory ? "folder.fill" : fileIcon(entry.name))
+                    .font(.title3)
+                    .foregroundStyle(entry.isDirectory ? Color.accentColor : Color.primary)
+                    .frame(width: 34)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.name)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if !entry.isDirectory, let size = entry.size {
+                        Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+                if loadingFilePath == entry.path {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: entry.isDirectory ? "chevron.right" : "eye")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 20)
+            .frame(minHeight: 64)
+        }
+        .buttonStyle(.plain)
+        .disabled(loadingFilePath != nil)
+        .contextMenu {
+            if !entry.isDirectory {
+                Button {
+                    previewFile(entry)
+                } label: {
+                    Label("Preview", systemImage: "eye")
+                }
+                Button {
+                    addToChat(entry)
+                } label: {
+                    Label("Add to Chat", systemImage: "paperclip")
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 58)
-        .contentShape(Rectangle())
+        .accessibilityLabel(entry.isDirectory ? "Folder, \(entry.name)" : "File, \(entry.name), preview")
+        .accessibilityHint(entry.isDirectory ? "Opens this folder" : "Opens a read-only preview. Touch and hold to add it to chat.")
     }
 
-    private var requestedParent: String? {
-        let path = model.requestedDirectoryPath
-        guard !path.isEmpty else { return nil }
-        let parts = path.split(separator: "/")
-        return parts.dropLast().joined(separator: "/")
+    private func navigate(to path: String) {
+        withAnimation(.snappy(duration: 0.28)) {
+            Task { await model.loadDirectory(path) }
+        }
     }
 
-    private var displayPath: String {
-        let path = model.requestedDirectoryPath
-        return path.isEmpty ? "/WHOX OS" : "/WHOX OS/" + path
+    private func previewFile(_ entry: DirectoryEntry) {
+        guard loadingFilePath == nil else { return }
+        loadingFilePath = entry.path
+        Task {
+            defer { loadingFilePath = nil }
+            guard let data = await model.directoryFileData(entry) else { return }
+            do {
+                let folder = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("WHOXDirectoryPreviews", isDirectory: true)
+                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: folder,
+                    withIntermediateDirectories: true,
+                    attributes: [.protectionKey: FileProtectionType.complete]
+                )
+                let url = folder.appendingPathComponent(entry.name)
+                try data.write(to: url, options: [.atomic, .completeFileProtection])
+                previewFolderURL = folder
+                preview = DirectoryPreview(url: url)
+            } catch {
+                model.errorMessage = "The file preview could not be prepared."
+            }
+        }
+    }
+
+    private func addToChat(_ entry: DirectoryEntry) {
+        guard loadingFilePath == nil else { return }
+        loadingFilePath = entry.path
+        Task {
+            defer { loadingFilePath = nil }
+            if await model.addDirectoryAttachment(entry) {
+                onClose()
+            }
+        }
+    }
+
+    private func removePreview() {
+        guard let folder = previewFolderURL else { return }
+        try? FileManager.default.removeItem(at: folder)
+        previewFolderURL = nil
+        preview = nil
+    }
+
+    private func fileIcon(_ name: String) -> String {
+        switch (name as NSString).pathExtension.lowercased() {
+        case "png", "jpg", "jpeg", "gif", "webp": return "photo"
+        case "pdf": return "doc.richtext"
+        case "swift", "py", "js", "ts", "html", "css", "sh": return "chevron.left.forwardslash.chevron.right"
+        default: return "doc"
+        }
+    }
+}
+
+private struct DirectoryPreview: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct DirectoryQuickLook: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {}
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
+        }
     }
 }

@@ -159,7 +159,8 @@ public struct ChatMessage: Codable, Identifiable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let value = try? c.decode(String.self, forKey: .id) { id = value }
-        else { id = String(try c.decode(Int.self, forKey: .id)) }
+        else if let value = try? c.decode(Int.self, forKey: .id) { id = String(value) }
+        else { id = "transient-\(UUID().uuidString.lowercased())" }
         sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
         role = try c.decode(MessageRole.self, forKey: .role)
         content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""

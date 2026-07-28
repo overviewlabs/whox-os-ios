@@ -55,6 +55,10 @@ actor GatewayService {
         try await decode { try $0.directory(path: path) }
     }
 
+    func directoryFile(path: String) async throws -> Data {
+        try await raw { try $0.directoryFile(path: path) }
+    }
+
     func streamChat(sessionID: String, message: String, attachmentIDs: [String] = [], requestID: String, onEvent: @MainActor @escaping (ChatStreamEvent) -> Void) async throws {
         for attempt in 0...1 {
             try Task.checkCancellation()

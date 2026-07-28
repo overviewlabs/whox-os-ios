@@ -125,15 +125,23 @@ struct ChatHomeView: View {
     }
 
     private var transcript: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 24) {
-                    ForEach(model.messages) { message in MessageRow(message: message).id(message.id) }
-                    if model.isSending { ProgressView().controlSize(.small).padding(.horizontal, 20).accessibilityLabel("WHOX OS is responding") }
-                }.padding(.vertical, 14)
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 24) {
+                        ForEach(model.messages) { message in
+                            MessageRow(
+                                message: message,
+                                maximumWidth: ChatBubbleContract.maximumWidth(containerWidth: geometry.size.width)
+                            )
+                            .id(message.id)
+                        }
+                        if model.isSending { ProgressView().controlSize(.small).padding(.horizontal, 20).accessibilityLabel("WHOX OS is responding") }
+                    }.padding(.vertical, 14)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: model.messages.last?.content) { _, _ in if let id = model.messages.last?.id { withAnimation { proxy.scrollTo(id, anchor: .bottom) } } }
             }
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: model.messages.last?.content) { _, _ in if let id = model.messages.last?.id { withAnimation { proxy.scrollTo(id, anchor: .bottom) } } }
         }
     }
 
@@ -462,13 +470,17 @@ private struct LiveAudioBars: View {
 
 private struct MessageRow: View {
     let message: ChatMessage
+    let maximumWidth: CGFloat
 
     var body: some View {
         HStack(alignment: .top) {
             if message.role == .user { Spacer(minLength: 54) }
             VStack(alignment: .leading, spacing: 10) {
                 if !message.content.isEmpty {
-                    StructuredChatText(content: message.content)
+                    StructuredChatText(
+                        content: message.content,
+                        expandsHorizontally: message.role != .user
+                    )
                 }
                 ForEach(message.attachments) { attachment in
                     HistoryAttachmentCard(attachment: attachment)
@@ -479,6 +491,7 @@ private struct MessageRow: View {
                 message.role == .user ? WHOXTheme.surface : Color.clear,
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
             )
+            .frame(maxWidth: maximumWidth, alignment: message.role == .user ? .trailing : .leading)
             if message.role != .user { Spacer(minLength: 0) }
         }
         .padding(.horizontal, 16)
@@ -562,6 +575,7 @@ private struct HistoryAttachmentCard: View {
 
 private struct StructuredChatText: View {
     let content: String
+    let expandsHorizontally: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -569,7 +583,7 @@ private struct StructuredChatText: View {
                 blockView(block)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: expandsHorizontally ? .infinity : nil, alignment: .leading)
         .textSelection(.enabled)
     }
 

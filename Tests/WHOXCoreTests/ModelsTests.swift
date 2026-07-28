@@ -78,3 +78,13 @@ import Testing
     let message = try JSONDecoder.whox.decode(ChatMessage.self, from: json)
     #expect(message.attachments.isEmpty)
 }
+
+@Test func decodesCompleteAssistantMessageWhenGatewayOmitsMessageID() throws {
+    let json = #"{"role":"assistant","content":"The answer arrived."}"#.data(using: .utf8)!
+
+    let message = try JSONDecoder.whox.decode(ChatMessage.self, from: json)
+
+    #expect(message.role == .assistant)
+    #expect(message.content == "The answer arrived.")
+    #expect(!message.id.isEmpty)
+}
