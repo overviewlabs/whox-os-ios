@@ -47,6 +47,7 @@ trap cleanup EXIT
 
 xcrun simctl boot "$UDID"
 xcrun simctl bootstatus "$UDID" -b
+defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false >/dev/null 2>&1 || true
 xcrun simctl install "$UDID" "$APP_PATH"
 xcrun simctl status_bar "$UDID" override --time '9:41' --batteryState charged --batteryLevel 100 >/dev/null 2>&1 || true
 mkdir -p .build/screenshots
@@ -57,6 +58,21 @@ for appearance in light dark; do
     xcrun simctl launch "$UDID" com.whox.whoxos
     sleep 3
     xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/login-${appearance}.png"
+
+    xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
+    xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-chat-empty
+    sleep 2
+    xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/chat-empty-${appearance}.png"
+
+    xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
+    xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-composer-typed
+    sleep 3
+    xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/composer-typed-${appearance}.png"
+
+    xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
+    xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-directory
+    sleep 2
+    xcrun simctl io "$UDID" screenshot --type=png ".build/screenshots/directory-${appearance}.png"
 
     xcrun simctl terminate "$UDID" com.whox.whoxos >/dev/null 2>&1 || true
     xcrun simctl launch "$UDID" com.whox.whoxos --visual-review-chat

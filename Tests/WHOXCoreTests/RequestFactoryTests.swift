@@ -106,3 +106,28 @@ import Testing
     #expect(request.url?.path == "/v1/uploads/00000000-0000-4000-8000-000000000021")
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer mobile-access-token")
 }
+
+@Test func buildsAuthenticatedRelativeDirectoryRequest() throws {
+    let factory = WHOXRequestFactory(
+        baseURL: URL(string: "https://mobile-api.whox.ai")!,
+        accessToken: "mobile-access-token"
+    )
+
+    let request = try factory.directory(path: "Apple Developer/projects")
+
+    #expect(request.httpMethod == "GET")
+    #expect(request.url?.path == "/v1/files")
+    #expect(request.url?.query == "path=Apple%20Developer/projects")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer mobile-access-token")
+}
+
+@Test func decodesDirectoryListingContract() throws {
+    let data = Data(#"{"object":"directory","path":"Apple Developer","parent":"","data":[{"name":"projects","path":"Apple Developer/projects","isDirectory":true,"size":null,"modifiedAt":123.0}]}"#.utf8)
+
+    let listing = try JSONDecoder.whox.decode(DirectoryListing.self, from: data)
+
+    #expect(listing.path == "Apple Developer")
+    #expect(listing.parent == "")
+    #expect(listing.data.first?.name == "projects")
+    #expect(listing.data.first?.isDirectory == true)
+}

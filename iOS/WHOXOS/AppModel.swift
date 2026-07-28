@@ -48,6 +48,9 @@ final class AppModel {
     var activeRunID: String?
     var pendingApproval: RunEvent?
     var pendingAttachments: [PendingChatAttachment] = []
+    var directoryListing: DirectoryListing?
+    var isLoadingDirectory = false
+    var directoryError: String?
     var streamResponses = true {
         didSet { defaults.set(streamResponses, forKey: "whox.streamResponses") }
     }
@@ -73,35 +76,49 @@ final class AppModel {
         defaults.removeObject(forKey: "whox.projects")
         defaults.removeObject(forKey: "whox.pinnedSessions")
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--visual-review-") }) {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains(where: { $0.hasPrefix("--visual-review-") }) {
             authenticationState = .signedIn(.init(id: "visual-review", email: "evans@whox.ai", role: "owner"))
             connection = .connected(serverName: "WHOX OS")
-            sessions = [.init(id: "visual-review", title: "General Assistance for Evans")]
+            sessions = [.init(id: "visual-review", title: "Chat")]
             selectedSessionID = "visual-review"
-            messages = [
-                .init(
-                    id: "visual-user",
-                    role: .user,
-                    content: "Describe this image\n\n📎 mechanical-room.jpg"
-                ),
-                .init(
-                    id: "visual-assistant",
-                    role: .assistant,
-                    content: """
-                    ## What’s in the image
+            if arguments.contains("--visual-review-chat") {
+                messages = [
+                    .init(
+                        id: "visual-user",
+                        role: .user,
+                        content: "Describe this image\n\n📎 mechanical-room.jpg"
+                    ),
+                    .init(
+                        id: "visual-assistant",
+                        role: .assistant,
+                        content: """
+                        ## What’s in the image
 
-                    This appears to be a **basement mechanical room** with an HVAC furnace and exposed utility connections.
+                        This appears to be a **basement mechanical room** with an HVAC furnace and exposed utility connections.
 
-                    ### Key details
+                        ### Key details
 
-                    - **Furnace:** A gray metal unit sits along the left wall.
-                    - **Gas line:** Black iron piping runs overhead with a red shutoff valve.
-                    - **Work area:** A red stepladder and scattered debris suggest active maintenance.
+                        - **Furnace:** A gray metal unit sits along the left wall.
+                        - **Gas line:** Black iron piping runs overhead with a red shutoff valve.
+                        - **Work area:** A red stepladder and scattered debris suggest active maintenance.
 
-                    > The gas valve should remain accessible and unobstructed.
-                    """
-                ),
-            ]
+                        > The gas valve should remain accessible and unobstructed.
+                        """
+                    ),
+                ]
+            }
+            if arguments.contains("--visual-review-directory") {
+                directoryListing = DirectoryListing(
+                    path: "",
+                    parent: nil,
+                    data: [
+                        .init(path: "Apple Developer", name: "Apple Developer", isDirectory: true, size: nil, modifiedAt: 1_786_000_000),
+                        .init(path: "Mobile Users", name: "Mobile Users", isDirectory: true, size: nil, modifiedAt: 1_786_000_000),
+                        .init(path: "README.md", name: "README.md", isDirectory: false, size: 4_820, modifiedAt: 1_786_000_000),
+                    ]
+                )
+            }
         }
 #endif
     }
@@ -450,7 +467,29 @@ final class AppModel {
         activeRunID = nil
         pendingApproval = nil
         attachmentCache.removeAllObjects()
+        directoryListing = nil
+        directoryError = nil
+        isLoadingDirectory = false
         clearPendingAttachments()
+    }
+
+    func loadDirectory(_ path: String = "") async {
+        let generation = accountGeneration
+        guard authenticatedUser?.role == "owner" || authenticatedUser?.role == "admin" else {
+            directoryError = "The server directory is available to owners only."
+            return
+        }
+        isLoadingDirectory = true
+        directoryError = nil
+        defer { if generation == accountGeneration { isLoadingDirectory = false } }
+        do {
+            let listing = try await gateway.directory(path: path)
+            guard generation == accountGeneration else { return }
+            directoryListing = listing
+        } catch {
+            guard generation == accountGeneration else { return }
+            directoryError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     func attachmentData(_ attachment: ChatAttachment) async -> Data? {

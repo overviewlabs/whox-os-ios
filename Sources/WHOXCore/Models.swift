@@ -38,6 +38,38 @@ public struct WHOXSession: Codable, Identifiable, Sendable, Equatable {
 }
 
 public struct CreateSessionResponse: Decodable, Sendable { public let object: String; public let session: WHOXSession }
+
+public struct DirectoryListing: Decodable, Sendable, Equatable {
+    public let object: String
+    public let path: String
+    public let parent: String?
+    public let data: [DirectoryEntry]
+
+    public init(object: String = "list", path: String, parent: String?, data: [DirectoryEntry]) {
+        self.object = object
+        self.path = path
+        self.parent = parent
+        self.data = data
+    }
+}
+
+public struct DirectoryEntry: Decodable, Identifiable, Sendable, Equatable {
+    public var id: String { path }
+    public let name: String
+    public let path: String
+    public let isDirectory: Bool
+    public let size: Int?
+    public let modifiedAt: Double
+
+    public init(path: String, name: String, isDirectory: Bool, size: Int?, modifiedAt: Double) {
+        self.path = path
+        self.name = name
+        self.isDirectory = isDirectory
+        self.size = size
+        self.modifiedAt = modifiedAt
+    }
+}
+
 public struct MessageList: Decodable, Sendable {
     public let object: String
     public let sessionID: String

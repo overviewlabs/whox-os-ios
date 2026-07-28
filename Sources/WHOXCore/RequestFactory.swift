@@ -38,6 +38,7 @@ public struct WHOXRequestFactory: Sendable {
         return r
     }
     public func attachment(_ id: String) throws -> URLRequest { try request(path: "/v1/uploads/\(escaped(id))") }
+    public func directory(path: String = "") throws -> URLRequest { try request(path: "/v1/files", queryItems: [.init(name: "path", value: path)]) }
     public func listJobs() throws -> URLRequest { try request(path: "/v1/jobs") }
     public func createJob(name: String, schedule: String, prompt: String) throws -> URLRequest { try jsonRequest(path: "/v1/jobs", method: "POST", object: ["name": name, "schedule": schedule, "prompt": prompt]) }
     public func deleteJob(_ id: String) throws -> URLRequest { try request(path: "/v1/jobs/\(escaped(id))", method: "DELETE") }

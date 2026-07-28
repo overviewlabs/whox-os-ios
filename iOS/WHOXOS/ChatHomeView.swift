@@ -7,7 +7,9 @@ import WHOXCore
 struct ChatHomeView: View {
     @Environment(AppModel.self) private var model
     let onOpenDrawer: () -> Void
+    let onOpenDirectory: () -> Void
     @State private var draft = ""
+    @State private var voice = VoiceInputService()
     @State private var showingPhotoPicker = false
     @State private var showingFileImporter = false
     @State private var selectedPhotos: [PhotosPickerItem] = []
@@ -41,24 +43,60 @@ struct ChatHomeView: View {
         ) { result in
             importFiles(result)
         }
+        .onChange(of: voice.transcript) { _, value in
+            if voice.isRecording || !value.isEmpty { draft = value }
+        }
+        .onChange(of: voice.errorMessage) { _, value in
+            if let value { model.errorMessage = value }
+        }
+        .onDisappear { voice.stop() }
+        .task {
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--visual-review-composer-typed") {
+                draft = "Hi"
+                try? await Task.sleep(for: .milliseconds(350))
+                composerFocused = true
+            }
+#endif
+        }
     }
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 0) {
             circleButton("line.3.horizontal", label: "Open navigation", action: onOpenDrawer)
             Spacer()
-            Text(model.selectedSession?.title ?? "WHOX OS").font(.headline).lineLimit(1).padding(.horizontal, 8)
+            Button {
+                composerFocused = false
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Chat")
+                        .font(.system(size: 17, weight: .semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(minWidth: 72, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Chat")
             Spacer()
-            circleButton("square.and.pencil", label: "New chat") { model.newChat() }
-        }.padding(.horizontal, 14).padding(.vertical, 6)
+            circleButton("sidebar.right", label: "Open folders and files", action: onOpenDirectory)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 64)
     }
 
     private var emptyState: some View {
         VStack(spacing: 0) {
-            Spacer()
-            Image("WHOXStudioLogo").resizable().scaledToFit().frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 12))
-            Text("How can I help?").font(.title2.bold()).padding(.top, 14)
-            Spacer()
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 20) {
+                suggestion("photo", "Create an image", prompt: "Create an image: ")
+                suggestion("pencil", "Write or edit", prompt: "Help me write or edit: ")
+                suggestion("globe", "Search the web", prompt: "Search the web for: ")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
     }
 
@@ -89,14 +127,10 @@ struct ChatHomeView: View {
                 .accessibilityLabel("Selected attachments")
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
+            HStack(spacing: 0) {
                 Menu {
-                    Button("Photo Library", systemImage: "photo.on.rectangle") {
-                        showingPhotoPicker = true
-                    }
-                    Button("Files", systemImage: "folder") {
-                        showingFileImporter = true
-                    }
+                    Button("Photo Library", systemImage: "photo.on.rectangle") { showingPhotoPicker = true }
+                    Button("Files", systemImage: "folder") { showingFileImporter = true }
                     Divider()
                     Button("New chat", systemImage: "square.and.pencil") {
                         model.newChat(); draft = ""; composerFocused = true
@@ -107,67 +141,140 @@ struct ChatHomeView: View {
                     Button("Write or edit", systemImage: "pencil.line") {
                         draft = "Help me write or edit: "; composerFocused = true
                     }
-                    Button("Look something up", systemImage: "magnifyingglass") {
-                        draft = "Look up and explain: "; composerFocused = true
+                    Button("Search the web", systemImage: "globe") {
+                        draft = "Search the web for: "; composerFocused = true
                     }
                 } label: {
                     Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .regular))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .disabled(model.isSending || model.pendingAttachments.count >= 5)
                 .accessibilityLabel("Add photos, files, or prompt actions")
 
-                TextField("Ask WHOX OS", text: $draft, axis: .vertical)
+                TextField("Ask WHOX OS", text: $draft)
                     .textFieldStyle(.plain)
-                    .lineLimit(1...6)
+                    .font(.system(size: 16))
                     .submitLabel(.send)
                     .onSubmit {
                         guard canSend || model.isSending else { return }
                         submitOrStop()
                     }
                     .focused($composerFocused)
-                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, minHeight: 44)
 
-                if !canSend && !model.isSending {
-                    Button { composerFocused = true } label: {
-                        Image(systemName: "mic.fill")
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Voice input")
-                    .accessibilityHint("Focuses the composer so you can use iPhone dictation")
-                } else {
-                    Button(action: submitOrStop) {
-                        Image(systemName: model.isSending ? "stop.fill" : "arrow.up")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(WHOXTheme.inverseText)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
-                    .disabled(!model.isSending && !canSend)
-                    .accessibilityLabel(model.isSending ? "Stop response" : "Send message")
+                Button(action: toggleVoiceInput) {
+                    Image(systemName: voice.isRecording ? "stop.circle.fill" : "mic")
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(voice.isRecording ? .red : .primary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .disabled(model.isSending)
+                .accessibilityLabel(voice.isRecording ? "Stop transcription" : "Start transcription")
+
+                trailingComposerControl
+                    .frame(width: ComposerContract.trailingSlot, height: 44)
             }
+            .padding(.horizontal, 4)
+            .frame(height: ComposerContract.containerHeight)
+            .background(WHOXTheme.surface, in: Capsule())
+            .overlay { Capsule().stroke(WHOXTheme.border, lineWidth: 0.7) }
         }
-        .padding(.horizontal, 8).padding(.vertical, 6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 25).stroke(WHOXTheme.border, lineWidth: 0.7) }
         .padding(.horizontal, 12)
+    }
+
+    @ViewBuilder private var trailingComposerControl: some View {
+        switch ComposerContract.trailingControl(
+            draft: draft,
+            isSending: model.isSending,
+            isRecording: voice.isRecording
+        ) {
+        case .microphone:
+            Button(action: toggleVoiceInput) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(WHOXTheme.background)
+                    .frame(width: 36, height: 36)
+                    .background(Color.primary, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Start voice transcription")
+        case .liveAudio:
+            Button(action: toggleVoiceInput) {
+                LiveAudioBars(level: voice.level)
+                    .foregroundStyle(WHOXTheme.background)
+                    .frame(width: 36, height: 36)
+                    .background(Color.primary, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Recording. Stop transcription")
+        case .send:
+            Button(action: submitOrStop) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(WHOXTheme.background)
+                    .frame(width: 36, height: 36)
+                    .background(Color.primary, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .accessibilityLabel("Send message")
+        case .stop:
+            Button(action: submitOrStop) {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(WHOXTheme.background)
+                    .frame(width: 36, height: 36)
+                    .background(Color.primary, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop response")
+        }
     }
 
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.pendingAttachments.isEmpty
     }
+
     private func submitOrStop() {
         if model.isSending { model.stopSending(); return }
         guard canSend else { return }
+        voice.stop()
         let value = draft
         draft = ""
         model.submit(value)
+    }
+
+    private func toggleVoiceInput() {
+        if voice.isRecording {
+            voice.stop()
+        } else {
+            composerFocused = false
+            Task { await voice.start(existingText: draft) }
+        }
+    }
+
+    private func suggestion(_ icon: String, _ title: String, prompt: String) -> some View {
+        Button {
+            draft = prompt
+            composerFocused = true
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .regular))
+                    .frame(width: 24, height: 24)
+                Text(title)
+                    .font(.system(size: 16))
+                Spacer()
+            }
+            .frame(minHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var allowedDocumentTypes: [UTType] {
@@ -264,12 +371,37 @@ struct ChatHomeView: View {
     }
 
     private func circleButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon) }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.circle)
-            .controlSize(.large)
-            .frame(minWidth: 44, minHeight: 44)
-            .accessibilityLabel(label)
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 40, height: 40)
+                .background(WHOXTheme.surface, in: Circle())
+                .overlay { Circle().stroke(WHOXTheme.border, lineWidth: 0.7) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .accessibilityLabel(label)
+    }
+}
+
+private struct LiveAudioBars: View {
+    let level: Double
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(0..<5, id: \.self) { index in
+                Capsule()
+                    .frame(width: 2.2, height: barHeight(index))
+                    .animation(.linear(duration: 0.09), value: level)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func barHeight(_ index: Int) -> CGFloat {
+        let multipliers: [Double] = [0.55, 0.82, 1, 0.72, 0.48]
+        return 5 + CGFloat(max(level, 0.06) * 13 * multipliers[index])
     }
 }
 
