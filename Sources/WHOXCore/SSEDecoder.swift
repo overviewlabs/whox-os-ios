@@ -55,14 +55,34 @@ public struct ChatSSEParser: Sendable {
         try decoder.feed(data).flatMap { event -> [ChatStreamEvent] in
             if event.data == "[DONE]" || event.event == "done" { return [.done] }
             guard let bytes = event.data.data(using: .utf8) else { return [] }
-            if let message = try? JSONDecoder.whox.decode(ChatMessage.self, from: bytes) { return [.message(message)] }
+            if event.event == nil, let message = try? JSONDecoder.whox.decode(ChatMessage.self, from: bytes) {
+                return [.message(message)]
+            }
             guard let json = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [] }
-            var events: [ChatStreamEvent] = []
-            if let session = (json["session_id"] ?? json["sessionId"]) as? String { events.append(.session(session)) }
-            if let error = json["error"] as? String { events.append(.error(error)) }
-            if let delta = (json["delta"] ?? json["content"] ?? json["text"]) as? String { events.append(.delta(delta)) }
-            else if let nested = json["message"] as? [String: Any], let content = nested["content"] as? String { events.append(.delta(content)) }
-            return events
+
+            switch event.event {
+            case "run.started":
+                guard let session = (json["session_id"] ?? json["sessionId"]) as? String else { return [] }
+                return [.session(session)]
+            case "assistant.delta":
+                guard let delta = (json["delta"] ?? json["content"] ?? json["text"]) as? String else { return [] }
+                return [.delta(delta)]
+            case "assistant.completed":
+                guard
+                    let id = (json["message_id"] ?? json["messageId"]) as? String,
+                    let content = json["content"] as? String
+                else { return [] }
+                return [.message(ChatMessage(id: id, role: .assistant, content: content))]
+            case "message.started", "tool.progress", "run.completed":
+                return []
+            default:
+                var events: [ChatStreamEvent] = []
+                if let session = (json["session_id"] ?? json["sessionId"]) as? String { events.append(.session(session)) }
+                if let error = json["error"] as? String { events.append(.error(error)) }
+                if let delta = (json["delta"] ?? json["content"] ?? json["text"]) as? String { events.append(.delta(delta)) }
+                else if let nested = json["message"] as? [String: Any], let content = nested["content"] as? String { events.append(.delta(content)) }
+                return events
+            }
         }
     }
 }

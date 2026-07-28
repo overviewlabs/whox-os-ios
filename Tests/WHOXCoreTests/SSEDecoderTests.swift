@@ -50,3 +50,37 @@ import Testing
     let events = try parser.feed(Data("data: {\"session_id\":\"s1\",\"delta\":\"Hello\"}\n\n".utf8))
     #expect(events == [.session("s1"), .delta("Hello")])
 }
+
+@Test func typedGatewayStreamIgnoresToolProgressAndReplacesPartialTextWithCompletion() throws {
+    var parser = ChatSSEParser()
+    let stream = """
+    event: run.started
+    data: {"session_id":"s1"}
+
+    event: assistant.delta
+    data: {"message_id":"m1","delta":"SH"}
+
+    event: assistant.delta
+    data: {"message_id":"m1","delta":"APE_OK"}
+
+    event: tool.progress
+    data: {"tool_name":"_thinking","delta":"SHAPE_OK"}
+
+    event: assistant.completed
+    data: {"session_id":"s1","message_id":"m1","content":"SHAPE_OK","completed":true}
+
+    event: done
+    data: {"session_id":"s1"}
+
+    """
+
+    let events = try parser.feed(Data((stream + "\n").utf8))
+
+    #expect(events == [
+        .session("s1"),
+        .delta("SH"),
+        .delta("APE_OK"),
+        .message(ChatMessage(id: "m1", role: .assistant, content: "SHAPE_OK")),
+        .done,
+    ])
+}
