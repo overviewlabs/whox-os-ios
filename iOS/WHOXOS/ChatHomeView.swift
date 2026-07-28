@@ -112,9 +112,10 @@ struct ChatHomeView: View {
                     }
                 } label: {
                     Image(systemName: "plus")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
-                .frame(width: 44, height: 44)
                 .disabled(model.isSending || model.pendingAttachments.count >= 5)
                 .accessibilityLabel("Add photos, files, or prompt actions")
 
@@ -122,26 +123,31 @@ struct ChatHomeView: View {
                     .textFieldStyle(.plain)
                     .lineLimit(1...6)
                     .submitLabel(.send)
+                    .onSubmit {
+                        guard canSend || model.isSending else { return }
+                        submitOrStop()
+                    }
                     .focused($composerFocused)
                     .padding(.vertical, 9)
 
                 if !canSend && !model.isSending {
                     Button { composerFocused = true } label: {
                         Image(systemName: "mic.fill")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
-                    .frame(width: 44, height: 44)
                     .accessibilityLabel("Voice input")
                     .accessibilityHint("Focuses the composer so you can use iPhone dictation")
                 } else {
                     Button(action: submitOrStop) {
                         Image(systemName: model.isSending ? "stop.fill" : "arrow.up")
                             .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(WHOXTheme.inverseText)
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
-                    .controlSize(.regular)
-                    .frame(width: 44, height: 44)
+                    .controlSize(.large)
                     .disabled(!model.isSending && !canSend)
                     .accessibilityLabel(model.isSending ? "Stop response" : "Send message")
                 }
