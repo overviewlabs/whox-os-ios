@@ -9,6 +9,7 @@ enum AppDestination: Hashable {
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var destination: AppDestination = .chat
     @State private var openPanel: DrawerSide?
@@ -88,7 +89,12 @@ struct RootView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay {
                         if panelProgress > 0 {
-                            Color.primary.opacity(DrawerPresentationContract.scrimOpacity(progress: panelProgress))
+                            Color.primary
+                                .opacity(DrawerPresentationContract.scrimOpacity(
+                                    progress: panelProgress,
+                                    isDarkMode: colorScheme == .dark
+                                ))
+                                .ignoresSafeArea()
                                 .contentShape(Rectangle())
                                 .onTapGesture { closePanels() }
                                 .accessibilityLabel("Close side panel")

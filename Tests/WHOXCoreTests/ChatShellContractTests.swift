@@ -47,9 +47,10 @@ import Foundation
     #expect(DrawerPresentationContract.opacity(progress: 1) == 1)
 }
 
-@Test func openDrawerUsesAnAdaptiveGreyChatScrim() {
-    #expect(DrawerPresentationContract.scrimOpacity(progress: 0) == 0)
-    #expect(DrawerPresentationContract.scrimOpacity(progress: 1) == 0.09)
+@Test func openDrawerUsesAnAdaptiveFullScreenChatScrim() {
+    #expect(DrawerPresentationContract.scrimOpacity(progress: 0, isDarkMode: true) == 0)
+    #expect(DrawerPresentationContract.scrimOpacity(progress: 1, isDarkMode: true) == 0.09)
+    #expect(DrawerPresentationContract.scrimOpacity(progress: 1, isDarkMode: false) == 0.26)
 }
 
 @Test func linkReferencesAcceptOnlyUniqueHTTPURLsAndProduceMessageContext() {
