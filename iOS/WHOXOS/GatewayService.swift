@@ -3,10 +3,12 @@ import WHOXCore
 
 enum GatewayError: LocalizedError {
     case invalidResponse
+    case duplicateSessionTitle
     case server(Int, String)
     var errorDescription: String? {
         switch self {
         case .invalidResponse: "WHOX OS returned an invalid response."
+        case .duplicateSessionTitle: "That chat title is already in use."
         case .server(let code, let message):
             if !message.isEmpty { message }
             else if code == 400 { "That message could not be sent. Please try again." }
@@ -23,7 +25,16 @@ actor GatewayService {
 
     func sessions() async throws -> [WHOXSession] { let r: SessionList = try await decode { try $0.listSessions() }; return r.data }
     func messages(_ id: String) async throws -> [ChatMessage] { let r: MessageList = try await decode { try $0.sessionMessages(id) }; return r.data }
-    func createSession(title: String) async throws -> WHOXSession { let r: CreateSessionResponse = try await decode { try $0.createSession(title: title) }; return r.session }
+    func createSession(title: String) async throws -> WHOXSession {
+        do {
+            let response: CreateSessionResponse = try await decode { try $0.createSession(title: title) }
+            return response.session
+        } catch GatewayError.duplicateSessionTitle {
+            let uniqueTitle = "\(title) · \(UUID().uuidString.prefix(6).lowercased())"
+            let response: CreateSessionResponse = try await decode { try $0.createSession(title: uniqueTitle) }
+            return response.session
+        }
+    }
     func renameSession(_ id: String, title: String) async throws { _ = try await raw { try $0.updateSession(id, title: title) } }
     func deleteSession(_ id: String) async throws { _ = try await raw { try $0.deleteSession(id) } }
     func jobs() async throws -> [ScheduledJob] { let r: JobList = try await decode { try $0.listJobs() }; return r.jobs }
@@ -113,7 +124,14 @@ actor GatewayService {
                 throw AuthenticationError.sessionExpired
             }
             guard (200..<300).contains(http.statusCode) else {
-                let message = (try? JSONDecoder().decode([String: String].self, from: data)["error"]) ?? ""
+                let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                let structuredError = payload?["error"] as? [String: Any]
+                if structuredError?["code"] as? String == "invalid_title" {
+                    throw GatewayError.duplicateSessionTitle
+                }
+                let message = payload?["error"] as? String
+                    ?? structuredError?["message"] as? String
+                    ?? ""
                 throw GatewayError.server(http.statusCode, message)
             }
             return data
