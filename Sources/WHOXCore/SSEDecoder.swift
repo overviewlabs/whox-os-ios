@@ -62,6 +62,30 @@ public struct ChatActivity: Sendable, Equatable, Identifiable {
 public enum ChatStreamEvent: Sendable, Equatable {
     case delta(String), message(ChatMessage), session(String), activity(ChatActivity), error(String), done
 }
+
+public struct ChatActivityTimeline: Sendable, Equatable {
+    public private(set) var activities: [ChatActivity] = []
+    private var acceptsActivities = true
+
+    public init() {}
+
+    public mutating func consume(_ event: ChatStreamEvent) {
+        switch event {
+        case .activity(let activity) where acceptsActivities:
+            if let index = activities.firstIndex(where: { $0.id == activity.id }) {
+                activities[index] = activity
+            } else {
+                activities.append(activity)
+            }
+        case .delta, .message, .error, .done:
+            acceptsActivities = false
+            activities.removeAll()
+        default:
+            break
+        }
+    }
+}
+
 public struct ChatSSEParser: Sendable {
     private var decoder = SSEDecoder()
     public init() {}

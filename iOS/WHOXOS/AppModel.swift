@@ -309,6 +309,7 @@ final class AppModel {
             guard let selectedSessionID else { throw GatewayError.invalidResponse }
             let attachmentIDs = attachments.map { $0.id.uuidString.lowercased() }
             if shouldStream {
+                var activityTimeline = ChatActivityTimeline()
                 try await gateway.streamChat(
                     sessionID: selectedSessionID,
                     message: text,
@@ -316,18 +317,15 @@ final class AppModel {
                     requestID: operationID.uuidString.lowercased()
                 ) { [weak self] event in
                     guard let self, self.chatOperationID == operationID else { return }
+                    activityTimeline.consume(event)
+                    self.chatActivities = activityTimeline.activities
                     switch event {
                     case .delta(let delta):
                         if let i = self.messages.firstIndex(where: { $0.id == assistantID }) { self.messages[i].content += delta }
                     case .message(let message):
                         if let i = self.messages.firstIndex(where: { $0.id == assistantID }) { self.messages[i] = message }
                     case .session(let id): self.selectedSessionID = id
-                    case .activity(let activity):
-                        if let index = self.chatActivities.firstIndex(where: { $0.id == activity.id }) {
-                            self.chatActivities[index] = activity
-                        } else {
-                            self.chatActivities.append(activity)
-                        }
+                    case .activity: break
                     case .error(let message): self.errorMessage = message
                     case .done: break
                     }
@@ -363,6 +361,7 @@ final class AppModel {
         chatTask = nil
         chatOperationID = nil
         isSending = false
+        chatActivities = []
     }
 
     private func discardChat() {

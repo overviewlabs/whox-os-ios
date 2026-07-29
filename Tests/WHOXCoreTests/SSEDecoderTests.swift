@@ -51,6 +51,33 @@ import Testing
     #expect(events == [.session("s1"), .delta("Hello")])
 }
 
+@Test func activityTimelineDisappearsWhenAssistantResponseStartsStreaming() {
+    var timeline = ChatActivityTimeline()
+    timeline.consume(.activity(.init(id: "working", kind: "work", label: "Working")))
+    #expect(timeline.activities.map(\.label) == ["Working"])
+
+    timeline.consume(.delta("Hello"))
+    #expect(timeline.activities.isEmpty)
+
+    timeline.consume(.activity(.init(id: "late", kind: "web", label: "Searching the web")))
+    #expect(timeline.activities.isEmpty)
+}
+
+@Test func activityTimelineDisappearsWhenCompletedMessageArrives() {
+    var timeline = ChatActivityTimeline()
+    timeline.consume(.activity(.init(id: "working", kind: "work", label: "Working")))
+    timeline.consume(.message(.init(id: "answer", role: .assistant, content: "Done")))
+    #expect(timeline.activities.isEmpty)
+}
+
+@Test func activityTimelineStaysHiddenAfterStreamFinishes() {
+    var timeline = ChatActivityTimeline()
+    timeline.consume(.activity(.init(id: "working", kind: "work", label: "Working")))
+    timeline.consume(.done)
+    timeline.consume(.activity(.init(id: "late", kind: "web", label: "Searching the web")))
+    #expect(timeline.activities.isEmpty)
+}
+
 @Test func typedGatewayStreamEmitsSanitizedActivityAndReplacesPartialTextWithCompletion() throws {
     var parser = ChatSSEParser()
     let stream = """
