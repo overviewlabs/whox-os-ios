@@ -63,7 +63,8 @@ struct RootView: View {
             ZStack {
                 HStack(spacing: 0) {
                     NavigationDrawer(onSelect: select, onClose: closePanels)
-                        .safeAreaPadding(.vertical)
+                        .padding(.top, geometry.safeAreaInsets.top)
+                        .padding(.bottom, geometry.safeAreaInsets.bottom)
                         .frame(width: navigationWidth)
                         .frame(maxHeight: .infinity)
                         .opacity(DrawerPresentationContract.opacity(progress: leadingProgress))
@@ -77,7 +78,8 @@ struct RootView: View {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         DirectoryDrawer(model: model, onClose: closePanels)
-                            .safeAreaPadding(.vertical)
+                            .padding(.top, geometry.safeAreaInsets.top)
+                            .padding(.bottom, geometry.safeAreaInsets.bottom)
                             .frame(width: directoryWidth)
                             .frame(maxHeight: .infinity)
                             .opacity(DrawerPresentationContract.opacity(progress: trailingProgress))
@@ -88,7 +90,8 @@ struct RootView: View {
                 }
 
                 mainContent
-                    .safeAreaPadding(.vertical)
+                    .padding(.top, geometry.safeAreaInsets.top)
+                    .padding(.bottom, geometry.safeAreaInsets.bottom)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay {
                         if panelProgress > 0 {
