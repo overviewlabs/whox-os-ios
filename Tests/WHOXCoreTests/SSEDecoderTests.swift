@@ -88,3 +88,23 @@ import Testing
         .done,
     ])
 }
+
+@Test func assistantCompletionPreservesGeneratedAttachments() throws {
+    var parser = ChatSSEParser()
+    let stream = """
+    event: assistant.completed
+    data: {"message_id":"m-media","role":"assistant","content":"Here is the image.","attachments":[{"id":"attachment-1","name":"cake.png","mimeType":"image/png","size":1234}]}
+
+    """
+
+    let events = try parser.feed(Data((stream + "\n").utf8))
+
+    #expect(events == [
+        .message(ChatMessage(
+            id: "m-media",
+            role: .assistant,
+            content: "Here is the image.",
+            attachments: [ChatAttachment(id: "attachment-1", name: "cake.png", mimeType: "image/png", size: 1234)]
+        )),
+    ])
+}

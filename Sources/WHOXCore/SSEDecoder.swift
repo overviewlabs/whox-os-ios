@@ -83,10 +83,19 @@ public struct ChatSSEParser: Sendable {
                 return [.delta(delta)]
             case "assistant.completed":
                 guard
-                    let id = (json["message_id"] ?? json["messageId"]) as? String,
+                    let id = (json["id"] ?? json["message_id"] ?? json["messageId"]) as? String,
                     let content = json["content"] as? String
                 else { return [] }
-                return [.message(ChatMessage(id: id, role: .assistant, content: content))]
+                let attachments = (json["attachments"] as? [[String: Any]] ?? []).compactMap { item -> ChatAttachment? in
+                    guard
+                        let attachmentID = item["id"] as? String,
+                        let name = item["name"] as? String,
+                        let mimeType = item["mimeType"] as? String,
+                        let size = item["size"] as? Int
+                    else { return nil }
+                    return ChatAttachment(id: attachmentID, name: name, mimeType: mimeType, size: size)
+                }
+                return [.message(ChatMessage(id: id, role: .assistant, content: content, attachments: attachments))]
             case "activity.progress":
                 guard
                     let id = json["id"] as? String,
