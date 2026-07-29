@@ -54,6 +54,10 @@ public enum DrawerPresentationContract {
         let amount = min(max(progress, 0), 1) * width
         return side == .leading ? amount : -amount
     }
+
+    public static func opacity(progress: CGFloat) -> CGFloat {
+        min(max(progress, 0), 1)
+    }
 }
 
 public enum LinkReferenceContract {

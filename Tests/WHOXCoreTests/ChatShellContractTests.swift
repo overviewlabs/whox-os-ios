@@ -41,6 +41,12 @@ import Foundation
     #expect(DrawerPresentationContract.mainOffset(side: .trailing, progress: 1, width: 300) == -300)
 }
 
+@Test func inactiveDrawerIsFullyHiddenBehindTheOppositePanel() {
+    #expect(DrawerPresentationContract.opacity(progress: 0) == 0)
+    #expect(DrawerPresentationContract.opacity(progress: 0.5) == 0.5)
+    #expect(DrawerPresentationContract.opacity(progress: 1) == 1)
+}
+
 @Test func linkReferencesAcceptOnlyUniqueHTTPURLsAndProduceMessageContext() {
     let links = LinkReferenceContract.validLinks(from: """
     https://example.com/report
