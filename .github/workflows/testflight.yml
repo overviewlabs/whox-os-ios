@@ -1,6 +1,9 @@
 name: TestFlight Release
 
 on:
+  push:
+    branches:
+      - review/polished-gateway-ui
   workflow_dispatch:
     inputs:
       version:
@@ -16,12 +19,25 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_VERSION: ${{ inputs.version || '0.1.0' }}
+  RELEASE_BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
+
 jobs:
   archive:
     runs-on: macos-15
     timeout-minutes: 45
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      build_number: ${{ steps.release.outputs.build_number }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Resolve release metadata
+        id: release
+        run: |
+          printf 'version=%s\n' "$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          printf 'build_number=%s\n' "$RELEASE_BUILD_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -79,8 +95,8 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/WHOXOS.xcarchive" \
-            MARKETING_VERSION='${{ inputs.version }}' \
-            CURRENT_PROJECT_VERSION='${{ inputs.build_number }}' \
+            MARKETING_VERSION="$RELEASE_VERSION" \
+            CURRENT_PROJECT_VERSION="$RELEASE_BUILD_NUMBER" \
             clean archive
 
       - name: Export signed IPA
@@ -101,12 +117,12 @@ jobs:
           ditto -x -k "${IPA[0]}" "$RUNNER_TEMP/ipa-check"
           APP=("$RUNNER_TEMP"/ipa-check/Payload/*.app)
           test "$(plutil -extract CFBundleIdentifier raw -o - "${APP[0]}/Info.plist")" = 'com.whox.whoxos'
-          test "$(plutil -extract CFBundleShortVersionString raw -o - "${APP[0]}/Info.plist")" = '${{ inputs.version }}'
-          test "$(plutil -extract CFBundleVersion raw -o - "${APP[0]}/Info.plist")" = '${{ inputs.build_number }}'
+          test "$(plutil -extract CFBundleShortVersionString raw -o - "${APP[0]}/Info.plist")" = "$RELEASE_VERSION"
+          test "$(plutil -extract CFBundleVersion raw -o - "${APP[0]}/Info.plist")" = "$RELEASE_BUILD_NUMBER"
           codesign --verify --deep --strict --verbose=2 "${APP[0]}"
           security cms -D -i "${APP[0]}/embedded.mobileprovision" > "$RUNNER_TEMP/profile.plist"
           test "$(plutil -extract Entitlements.application-identifier raw -o - "$RUNNER_TEMP/profile.plist")" = '8PN4T7SR2G.com.whox.whoxos'
-          printf 'Signed IPA validated: com.whox.whoxos %s (%s)\n' '${{ inputs.version }}' '${{ inputs.build_number }}'
+          printf 'Signed IPA validated: com.whox.whoxos %s (%s)\n' "$RELEASE_VERSION" "$RELEASE_BUILD_NUMBER"
 
       - name: Upload to App Store Connect
         env:
@@ -135,7 +151,7 @@ jobs:
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v5
         with:
-          name: whox-os-${{ inputs.version }}-${{ inputs.build_number }}
+          name: whox-os-${{ env.RELEASE_VERSION }}-${{ env.RELEASE_BUILD_NUMBER }}
           path: ${{ runner.temp }}/export/*.ipa
           if-no-files-found: error
           retention-days: 1
@@ -147,3 +163,64 @@ jobs:
           [[ -n "${ASC_PRIVATE_KEY_PATH:-}" ]] && rm -f "$ASC_PRIVATE_KEY_PATH"
           [[ -n "${INSTALLED_PROFILE:-}" ]] && rm -f "$INSTALLED_PROFILE"
           [[ -n "${SIGNING_KEYCHAIN:-}" ]] && security delete-keychain "$SIGNING_KEYCHAIN"
+
+  distribute:
+    needs: archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_BASE64: ${{ secrets.ASC_PRIVATE_KEY_BASE64 }}
+      APP_ID: "6795136394"
+      BETA_GROUP_ID: a14460fb-48be-49cb-a39f-18c3fc9001fc
+    steps:
+      - name: Install verified App Store Connect CLI
+        run: |
+          set -euo pipefail
+          curl -LfsS -o asc https://github.com/rorkai/App-Store-Connect-CLI/releases/download/3.1.3/asc_3.1.3_linux_amd64
+          printf '%s  %s\n' '5a3844228bfd767da5c68c192f134e729dc0c93dc93855b350bc7b8650d82a97' asc | sha256sum --check --status
+          chmod 755 asc
+          sudo install asc /usr/local/bin/asc
+
+      - name: Authenticate App Store Connect
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_PRIVATE_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          asc auth login \
+            --bypass-keychain \
+            --local \
+            --name CI \
+            --key-id "$ASC_KEY_ID" \
+            --issuer-id "$ASC_ISSUER_ID" \
+            --private-key "$KEY_PATH"
+          rm -f "$KEY_PATH"
+
+      - name: Publish to internal TestFlight testers
+        env:
+          VERSION: ${{ needs.archive.outputs.version }}
+          BUILD_NUMBER: ${{ needs.archive.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          BUILD_JSON=$(asc builds wait \
+            --app "$APP_ID" \
+            --version "$VERSION" \
+            --build-number "$BUILD_NUMBER" \
+            --platform IOS \
+            --fail-on-invalid \
+            --timeout 15m \
+            --poll-interval 20s \
+            --output json)
+          BUILD_ID=$(jq -r '.buildId' <<< "$BUILD_JSON")
+          test -n "$BUILD_ID"
+          test "$BUILD_ID" != null
+          asc builds add-groups --build-id "$BUILD_ID" --group "$BETA_GROUP_ID" --output json
+          asc testflight groups links view \
+            --group-id "$BETA_GROUP_ID" \
+            --type builds \
+            --paginate \
+            --output json | jq -e --arg id "$BUILD_ID" 'any(.data[]; .id == $id)'
+          asc testflight distribution view --build-id "$BUILD_ID" --output json \
+            | jq -e '.data[0].attributes.internalBuildState == "IN_BETA_TESTING"'
