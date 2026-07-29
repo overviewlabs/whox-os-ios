@@ -80,6 +80,7 @@ import Testing
     #expect(request.url?.path == "/v1/sessions/ios-main/chat/stream")
     #expect(request.value(forHTTPHeaderField: "Accept") == "text/event-stream")
     #expect(request.value(forHTTPHeaderField: "X-WHOX-Turn-ID") == "00000000-0000-4000-8000-000000000014")
+    #expect(request.timeoutInterval >= 60 * 60)
 }
 
 @Test func buildsCompleteChatRequestWhenStreamingIsDisabled() throws {

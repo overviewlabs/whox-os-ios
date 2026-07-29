@@ -22,7 +22,10 @@ public struct WHOXRequestFactory: Sendable {
         var object: [String: Any] = ["input": message]
         if !attachmentIDs.isEmpty { object["attachment_ids"] = attachmentIDs }
         var r = try jsonRequest(path: "/v1/sessions/\(escaped(sessionID))\(suffix)", method: "POST", object: object)
-        if stream { r.setValue("text/event-stream", forHTTPHeaderField: "Accept") }
+        if stream {
+            r.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            r.timeoutInterval = 60 * 60
+        }
         if let requestID { r.setValue(requestID, forHTTPHeaderField: "X-WHOX-Turn-ID") }
         return r
     }
