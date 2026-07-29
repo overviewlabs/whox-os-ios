@@ -196,7 +196,7 @@ jobs:
             --key-id "$ASC_KEY_ID" \
             --issuer-id "$ASC_ISSUER_ID" \
             --private-key "$KEY_PATH"
-          rm -f "$KEY_PATH"
+          printf 'ASC_CI_KEY_PATH=%s\n' "$KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Publish to internal TestFlight testers
         env:
@@ -224,3 +224,7 @@ jobs:
             --output json | jq -e --arg id "$BUILD_ID" 'any(.data[]; .id == $id)'
           asc testflight distribution view --build-id "$BUILD_ID" --output json \
             | jq -e '.data[0].attributes.internalBuildState == "IN_BETA_TESTING"'
+
+      - name: Remove App Store Connect key
+        if: always()
+        run: rm -f "${ASC_CI_KEY_PATH:-}"
