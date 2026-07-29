@@ -51,7 +51,7 @@ import Testing
     #expect(events == [.session("s1"), .delta("Hello")])
 }
 
-@Test func typedGatewayStreamIgnoresToolProgressAndReplacesPartialTextWithCompletion() throws {
+@Test func typedGatewayStreamEmitsSanitizedActivityAndReplacesPartialTextWithCompletion() throws {
     var parser = ChatSSEParser()
     let stream = """
     event: run.started
@@ -62,6 +62,9 @@ import Testing
 
     event: assistant.delta
     data: {"message_id":"m1","delta":"APE_OK"}
+
+    event: activity.progress
+    data: {"id":"call-1","kind":"files","label":"Inspecting files"}
 
     event: tool.progress
     data: {"tool_name":"_thinking","delta":"SHAPE_OK"}
@@ -80,6 +83,7 @@ import Testing
         .session("s1"),
         .delta("SH"),
         .delta("APE_OK"),
+        .activity(ChatActivity(id: "call-1", kind: "files", label: "Inspecting files")),
         .message(ChatMessage(id: "m1", role: .assistant, content: "SHAPE_OK")),
         .done,
     ])

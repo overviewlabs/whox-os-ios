@@ -47,7 +47,21 @@ public struct SSEDecoder: Sendable {
     private func value(_ v: Substring) -> String { v.first == " " ? String(v.dropFirst()) : String(v) }
 }
 
-public enum ChatStreamEvent: Sendable, Equatable { case delta(String), message(ChatMessage), session(String), error(String), done }
+public struct ChatActivity: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let kind: String
+    public let label: String
+
+    public init(id: String, kind: String, label: String) {
+        self.id = id
+        self.kind = kind
+        self.label = label
+    }
+}
+
+public enum ChatStreamEvent: Sendable, Equatable {
+    case delta(String), message(ChatMessage), session(String), activity(ChatActivity), error(String), done
+}
 public struct ChatSSEParser: Sendable {
     private var decoder = SSEDecoder()
     public init() {}
@@ -73,6 +87,14 @@ public struct ChatSSEParser: Sendable {
                     let content = json["content"] as? String
                 else { return [] }
                 return [.message(ChatMessage(id: id, role: .assistant, content: content))]
+            case "activity.progress":
+                guard
+                    let id = json["id"] as? String,
+                    let kind = json["kind"] as? String,
+                    let label = json["label"] as? String,
+                    !id.isEmpty, !kind.isEmpty, !label.isEmpty
+                else { return [] }
+                return [.activity(ChatActivity(id: id, kind: kind, label: label))]
             case "message.started", "tool.progress", "run.completed":
                 return []
             default:

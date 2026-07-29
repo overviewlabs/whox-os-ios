@@ -154,11 +154,22 @@ struct ChatHomeView: View {
                             )
                             .id(message.id)
                         }
-                        if model.isSending { ProgressView().controlSize(.small).padding(.horizontal, 20).accessibilityLabel("WHOX OS is responding") }
+                        if !model.chatActivities.isEmpty {
+                            ChatActivityRows(activities: model.chatActivities, isActive: model.isSending)
+                                .id("chat-activity-progress")
+                        } else if model.isSending {
+                            ProgressView()
+                                .controlSize(.small)
+                                .padding(.horizontal, 20)
+                                .accessibilityLabel("WHOX OS is responding")
+                        }
                     }.padding(.vertical, 14)
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: model.messages.last?.content) { _, _ in if let id = model.messages.last?.id { withAnimation { proxy.scrollTo(id, anchor: .bottom) } } }
+                .onChange(of: model.chatActivities.count) { _, count in
+                    if count > 0 { withAnimation { proxy.scrollTo("chat-activity-progress", anchor: .bottom) } }
+                }
             }
         }
     }
@@ -521,6 +532,47 @@ struct ChatHomeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+    }
+}
+
+private struct ChatActivityRows: View {
+    let activities: [ChatActivity]
+    let isActive: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
+                let current = isActive && index == activities.indices.last
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: symbol(for: activity.kind))
+                        .font(.system(size: 14, weight: .regular))
+                        .frame(width: 18)
+                        .symbolEffect(.pulse, options: .repeating, value: current)
+                    Text(activity.label)
+                        .font(.system(size: 15, weight: .regular))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(activity.label)
+                .accessibilityValue(current ? "In progress" : "Completed")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+    }
+
+    private func symbol(for kind: String) -> String {
+        switch kind {
+        case "files": "doc.text.magnifyingglass"
+        case "web": "globe"
+        case "terminal": "terminal"
+        case "edit": "pencil.and.outline"
+        case "image": "photo"
+        case "schedule": "calendar.badge.clock"
+        case "agents": "person.2"
+        default: "sparkles"
+        }
     }
 }
 

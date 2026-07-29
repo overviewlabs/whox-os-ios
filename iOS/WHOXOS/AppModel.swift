@@ -44,6 +44,7 @@ final class AppModel {
     var inspector: [String: JSONValue] = [:]
     var isLoading = false
     var isSending = false
+    var chatActivities: [ChatActivity] = []
     var errorMessage: String?
     var activeRunID: String?
     var pendingApproval: RunEvent?
@@ -119,6 +120,16 @@ final class AppModel {
                     ),
                 ]
             }
+            if arguments.contains("--visual-review-actions") {
+                messages = [.init(id: "visual-action-user", role: .user, content: "Build an inventory workbook")]
+                chatActivities = [
+                    .init(id: "visual-files", kind: "files", label: "Inspected workbook files and structure"),
+                    .init(id: "visual-edit", kind: "edit", label: "Designed inventory inputs"),
+                    .init(id: "visual-code", kind: "terminal", label: "Built dynamic formulas"),
+                    .init(id: "visual-test", kind: "terminal", label: "Testing private spreadsheet import"),
+                ]
+                isSending = true
+            }
             if arguments.contains("--visual-review-composer-attachment") {
                 pendingAttachments = [
                     .init(name: "README.md", mimeType: "text/markdown", data: Data("Reference file".utf8))
@@ -188,6 +199,7 @@ final class AppModel {
 
     func selectSession(_ id: String?) async {
         discardChat()
+        chatActivities = []
         clearPendingComposerItems()
         let requestID = UUID()
         sessionLoadID = requestID
@@ -209,6 +221,7 @@ final class AppModel {
 
     func newChat() {
         discardChat()
+        chatActivities = []
         clearPendingComposerItems()
         sessionLoadID = UUID()
         selectedSessionID = nil
@@ -257,6 +270,7 @@ final class AppModel {
         let shouldStream = streamResponses
         guard (!text.isEmpty || !attachments.isEmpty), chatOperationID == operationID else { return }
         isSending = true
+        chatActivities = []
         errorMessage = nil
         do {
             if selectedSessionID == nil {
@@ -308,6 +322,12 @@ final class AppModel {
                     case .message(let message):
                         if let i = self.messages.firstIndex(where: { $0.id == assistantID }) { self.messages[i] = message }
                     case .session(let id): self.selectedSessionID = id
+                    case .activity(let activity):
+                        if let index = self.chatActivities.firstIndex(where: { $0.id == activity.id }) {
+                            self.chatActivities[index] = activity
+                        } else {
+                            self.chatActivities.append(activity)
+                        }
                     case .error(let message): self.errorMessage = message
                     case .done: break
                     }
