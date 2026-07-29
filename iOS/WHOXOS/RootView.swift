@@ -88,7 +88,7 @@ struct RootView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay {
                         if panelProgress > 0 {
-                            Color.black.opacity(0.26 * panelProgress)
+                            Color.primary.opacity(DrawerPresentationContract.scrimOpacity(progress: panelProgress))
                                 .contentShape(Rectangle())
                                 .onTapGesture { closePanels() }
                                 .accessibilityLabel("Close side panel")

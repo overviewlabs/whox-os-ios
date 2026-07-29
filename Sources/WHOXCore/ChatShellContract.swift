@@ -58,6 +58,10 @@ public enum DrawerPresentationContract {
     public static func opacity(progress: CGFloat) -> CGFloat {
         min(max(progress, 0), 1)
     }
+
+    public static func scrimOpacity(progress: CGFloat) -> CGFloat {
+        min(max(progress, 0), 1) * 0.09
+    }
 }
 
 public enum LinkReferenceContract {

@@ -47,6 +47,11 @@ import Foundation
     #expect(DrawerPresentationContract.opacity(progress: 1) == 1)
 }
 
+@Test func openDrawerUsesAnAdaptiveGreyChatScrim() {
+    #expect(DrawerPresentationContract.scrimOpacity(progress: 0) == 0)
+    #expect(DrawerPresentationContract.scrimOpacity(progress: 1) == 0.09)
+}
+
 @Test func linkReferencesAcceptOnlyUniqueHTTPURLsAndProduceMessageContext() {
     let links = LinkReferenceContract.validLinks(from: """
     https://example.com/report
