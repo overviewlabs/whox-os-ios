@@ -10,6 +10,12 @@ public enum ChatBubbleContract {
     }
 }
 
+public enum ChatActivityPresentationContract {
+    public static func visibleActivities(_ activities: [ChatActivity], expanded: Bool) -> [ChatActivity] {
+        expanded ? activities : Array(activities.suffix(1))
+    }
+}
+
 public enum DrawerSide: Sendable, Equatable {
     case leading
     case trailing

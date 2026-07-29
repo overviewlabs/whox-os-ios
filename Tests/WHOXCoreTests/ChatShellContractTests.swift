@@ -2,6 +2,17 @@ import Testing
 import Foundation
 @testable import WHOXCore
 
+@Test func activityProgressShowsOnlyCurrentStepUntilExpanded() {
+    let activities = [
+        ChatActivity(id: "1", kind: "web", label: "Searching the web"),
+        ChatActivity(id: "2", kind: "web", label: "Reading web sources"),
+        ChatActivity(id: "3", kind: "terminal", label: "Running a command"),
+    ]
+
+    #expect(ChatActivityPresentationContract.visibleActivities(activities, expanded: false) == [activities[2]])
+    #expect(ChatActivityPresentationContract.visibleActivities(activities, expanded: true) == activities)
+}
+
 @Test func messageBubblesUseReadableMaximumWithoutForcingShortMessagesWide() {
     #expect(ChatBubbleContract.maximumWidth(containerWidth: 390) == 312)
     #expect(ChatBubbleContract.maximumWidth(containerWidth: 1_024) == 480)

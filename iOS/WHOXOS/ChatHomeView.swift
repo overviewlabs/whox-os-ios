@@ -538,28 +538,56 @@ struct ChatHomeView: View {
 private struct ChatActivityRows: View {
     let activities: [ChatActivity]
     let isActive: Bool
+    @State private var isExpanded = false
+
+    private var visibleActivities: [ChatActivity] {
+        ChatActivityPresentationContract.visibleActivities(activities, expanded: isExpanded)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
-                let current = isActive && index == activities.indices.last
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: symbol(for: activity.kind))
-                        .font(.system(size: 14, weight: .regular))
-                        .frame(width: 18)
-                        .symbolEffect(.pulse, options: .repeating, value: current)
-                    Text(activity.label)
-                        .font(.system(size: 15, weight: .regular))
-                        .fixedSize(horizontal: false, vertical: true)
+            ForEach(visibleActivities) { activity in
+                let current = isActive && activity.id == activities.last?.id
+                if current && activities.count > 1 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                    } label: {
+                        activityRow(activity, current: true, showsDisclosure: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(activity.label)
+                    .accessibilityValue(isExpanded ? "In progress, history expanded" : "In progress, history collapsed")
+                    .accessibilityHint(isExpanded ? "Collapses activity history" : "Shows activity history")
+                } else {
+                    activityRow(activity, current: current, showsDisclosure: false)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(activity.label)
+                        .accessibilityValue(current ? "In progress" : "Completed")
                 }
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(activity.label)
-                .accessibilityValue(current ? "In progress" : "Completed")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
+    }
+
+    private func activityRow(_ activity: ChatActivity, current: Bool, showsDisclosure: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: symbol(for: activity.kind))
+                .font(.system(size: 14, weight: .regular))
+                .frame(width: 18)
+                .symbolEffect(.pulse, options: .repeating, value: current)
+            Text(activity.label)
+                .font(.system(size: 15, weight: .regular))
+                .fixedSize(horizontal: false, vertical: true)
+            if showsDisclosure {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .accessibilityHidden(true)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .contentShape(Rectangle())
     }
 
     private func symbol(for kind: String) -> String {
