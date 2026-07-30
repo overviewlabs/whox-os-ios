@@ -2,12 +2,14 @@ import SwiftUI
 
 @main
 struct WHOXOSApp: App {
-    @State private var model = AppModel()
+    @State private var store = MessageStore()
+    @State private var gatewayConfiguration = GatewayConfiguration()
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(model)
+            MessagesListView()
+                .environment(store)
+                .environment(gatewayConfiguration)
         }
     }
 }

@@ -6,19 +6,12 @@ options:
   xcodeVersion: "16.0"
   createIntermediateGroups: true
 
-packages:
-  WHOXCore:
-    path: .
-
 targets:
   WHOXOS:
     type: application
     platform: iOS
     sources:
       - path: iOS/WHOXOS
-    dependencies:
-      - package: WHOXCore
-        product: WHOXCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.whox.whoxos
@@ -35,8 +28,6 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: WHOX OS uses the microphone only while you record a message for transcription.
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: WHOX OS transcribes your recorded speech into the chat composer.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         DEVELOPMENT_TEAM: 8PN4T7SR2G
         CODE_SIGN_STYLE: Manual
