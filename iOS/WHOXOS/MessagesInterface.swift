@@ -1,8 +1,9 @@
 import Observation
 import SwiftUI
+import WHOXCore
 
-struct ChatMessage: Identifiable, Hashable {
-    enum Sender: Hashable {
+struct ChatMessage: Identifiable, Hashable, Codable {
+    enum Sender: String, Hashable, Codable {
         case contact
         case user
     }
@@ -20,7 +21,7 @@ struct ChatMessage: Identifiable, Hashable {
     }
 }
 
-struct Conversation: Identifiable, Hashable {
+struct Conversation: Identifiable, Hashable, Codable {
     let id: String
     var name: String
     var initials: String
@@ -64,39 +65,73 @@ struct Conversation: Identifiable, Hashable {
 @Observable
 final class MessageStore {
     private static let lastReadAssistantIDsKey = "hermes.sessions.last-read-assistant-ids"
+    private static let snapshotVersion = 1
 
-    var conversations: [Conversation] = [
-        Conversation(
-            name: "+1 (888) 555-1212",
-            initials: "JA",
-            preview: "Hi",
-            messages: [ChatMessage(sender: .user, text: "Hi")]
-        ),
-        Conversation(name: "+1 (555) 564-8583", initials: "KB", preview: "Hi"),
-    ]
+    var conversations: [Conversation] {
+        didSet { persistSnapshot() }
+    }
+    private(set) var hasCachedSnapshot: Bool
     var isSyncing = false
     var sendingSessionIDs: Set<String> = []
     var errorMessage: String?
     @ObservationIgnored private var gatewayClient: HermesGatewayClient?
     @ObservationIgnored private var activeConversationID: Conversation.ID?
+    @ObservationIgnored private var syncInProgress = false
+    @ObservationIgnored private var connectionGeneration = 0
     @ObservationIgnored private var lastReadAssistantIDs =
         UserDefaults.standard.dictionary(forKey: MessageStore.lastReadAssistantIDsKey)
             as? [String: String] ?? [:]
+
+    init() {
+        if let snapshot = Self.loadSnapshot() {
+            conversations = snapshot.conversations
+            hasCachedSnapshot = true
+        } else {
+            conversations = []
+            hasCachedSnapshot = false
+        }
+    }
 
     func conversation(_ id: Conversation.ID) -> Conversation? {
         conversations.first { $0.id == id }
     }
 
-    func connect(to client: HermesGatewayClient) async throws {
-        isSyncing = true
+    func connect(
+        to client: HermesGatewayClient,
+        trigger: GatewaySyncTrigger = .manualConnection
+    ) async throws {
+        let startedGeneration = connectionGeneration
+        while syncInProgress {
+            guard trigger == .manualConnection else { return }
+            try await Task.sleep(for: .milliseconds(100))
+            try ensureCurrentGeneration(startedGeneration)
+        }
+        try ensureCurrentGeneration(startedGeneration)
+        gatewayClient = client
+        syncInProgress = true
+        isSyncing = GatewaySyncPolicy.presentation(
+            for: trigger,
+            hasCachedSnapshot: hasCachedSnapshot
+        ) == .blocking
         errorMessage = nil
-        defer { isSyncing = false }
+        defer {
+            isSyncing = false
+            syncInProgress = false
+        }
 
         let sessions = try await client.listAllSessions()
+        try ensureCurrentConnection(startedGeneration)
         var loadedSessions: [(session: HermesSession, messages: [HermesMessage])] = []
         loadedSessions.reserveCapacity(sessions.count)
         for session in sessions {
-            let messages = (try? await client.messages(sessionID: session.id)) ?? []
+            let messages: [HermesMessage]
+            do {
+                messages = try await client.messages(sessionID: session.id)
+            } catch {
+                try Task.checkCancellation()
+                messages = []
+            }
+            try ensureCurrentConnection(startedGeneration)
             loadedSessions.append((session, messages))
         }
 
@@ -125,7 +160,9 @@ final class MessageStore {
         imported.reserveCapacity(sessions.count)
         for item in loadedSessions {
             if leakedSessionIDs.contains(item.session.id) {
+                try ensureCurrentConnection(startedGeneration)
                 try? await client.deleteSession(item.session.id)
+                try ensureCurrentConnection(startedGeneration)
                 continue
             }
             var conversation = Conversation(
@@ -144,23 +181,33 @@ final class MessageStore {
             }
             imported.append(conversation)
         }
+        try ensureCurrentConnection(startedGeneration)
         persistReadState()
 
-        gatewayClient = client
+        hasCachedSnapshot = true
         conversations = imported
     }
 
-    func refresh() async {
-        guard let gatewayClient else { return }
+    @discardableResult
+    func refresh(trigger: GatewaySyncTrigger = .periodic) async -> Bool {
+        guard let gatewayClient else { return false }
+        guard sendingSessionIDs.isEmpty else { return true }
         do {
-            try await connect(to: gatewayClient)
+            try await connect(to: gatewayClient, trigger: trigger)
+            return true
         } catch {
-            errorMessage = error.localizedDescription
+            if trigger == .manualConnection {
+                errorMessage = error.localizedDescription
+            }
+            return false
         }
     }
 
     func disconnect() {
+        connectionGeneration &+= 1
         gatewayClient = nil
+        hasCachedSnapshot = false
+        Self.deleteSnapshot()
         conversations = []
         sendingSessionIDs = []
         errorMessage = nil
@@ -330,6 +377,81 @@ final class MessageStore {
         UserDefaults.standard.set(lastReadAssistantIDs, forKey: Self.lastReadAssistantIDsKey)
     }
 
+    private func ensureCurrentGeneration(_ startedGeneration: Int) throws {
+        try Task.checkCancellation()
+        guard GatewaySyncPolicy.canCommit(
+            startedGeneration: startedGeneration,
+            currentGeneration: connectionGeneration
+        ) else {
+            throw CancellationError()
+        }
+    }
+
+    private func ensureCurrentConnection(_ startedGeneration: Int) throws {
+        try ensureCurrentGeneration(startedGeneration)
+        guard gatewayClient != nil else {
+            throw CancellationError()
+        }
+    }
+
+    private struct StoredSnapshot: Codable {
+        let version: Int
+        let savedAt: Date
+        let conversations: [Conversation]
+    }
+
+    private static var snapshotURL: URL? {
+        guard let directory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            return nil
+        }
+        return directory
+            .appendingPathComponent("WHOXOS", isDirectory: true)
+            .appendingPathComponent("hermes-sessions.json", isDirectory: false)
+    }
+
+    private static func loadSnapshot() -> StoredSnapshot? {
+        guard
+            let url = snapshotURL,
+            let data = try? Data(contentsOf: url),
+            let snapshot = try? JSONDecoder().decode(StoredSnapshot.self, from: data),
+            snapshot.version == snapshotVersion
+        else {
+            return nil
+        }
+        return snapshot
+    }
+
+    private func persistSnapshot() {
+        guard hasCachedSnapshot, let url = Self.snapshotURL else { return }
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+            )
+            let snapshot = StoredSnapshot(
+                version: Self.snapshotVersion,
+                savedAt: .now,
+                conversations: conversations
+            )
+            let data = try JSONEncoder().encode(snapshot)
+            try data.write(
+                to: url,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+        } catch {
+            // A cache failure must never interrupt live chat or disconnect the gateway.
+        }
+    }
+
+    private static func deleteSnapshot() {
+        guard let url = snapshotURL else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     fileprivate static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
@@ -395,6 +517,7 @@ private extension ChatMessage {
 struct MessagesListView: View {
     @Environment(MessageStore.self) private var store
     @Environment(GatewayConfiguration.self) private var gatewayConfiguration
+    @Environment(\.scenePhase) private var scenePhase
     @State private var path: [Conversation.ID] = []
     @State private var searchText = ""
     @State private var showingNewMessage = false
@@ -494,7 +617,7 @@ struct MessagesListView: View {
             }
             .listStyle(.plain)
             .refreshable {
-                await store.refresh()
+                await store.refresh(trigger: .foreground)
             }
             .scrollContentBackground(.hidden)
             .background(Color(uiColor: .systemBackground))
@@ -530,7 +653,7 @@ struct MessagesListView: View {
         }
         .sheet(isPresented: $showingGatewaySetup) {
             GatewaySetupView(
-                onConnect: { await connectGateway() },
+                onConnect: { await connectGateway(trigger: .manualConnection) },
                 onDisconnect: {
                     store.disconnect()
                     showingGatewaySetup = false
@@ -538,22 +661,30 @@ struct MessagesListView: View {
             )
             .environment(gatewayConfiguration)
         }
-        .overlay {
-            if store.isSyncing {
-                ProgressView("Syncing Hermes…")
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 16)
-                    .platformGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+        .task(id: scenePhase) {
+            guard scenePhase == .active else {
+                if scenePhase == .background {
+                    BackgroundSyncCoordinator.shared.schedule()
+                }
+                return
             }
-        }
-        .animation(.whoxSmooth, value: store.isSyncing)
-        .task {
             guard gatewayConfiguration.isConfigured else {
                 showingGatewaySetup = true
                 return
             }
-            await connectGateway()
+            await connectGateway(
+                trigger: store.hasCachedSnapshot ? .foreground : .launch
+            )
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(
+                        for: .seconds(GatewaySyncPolicy.foregroundRefreshInterval)
+                    )
+                } catch {
+                    return
+                }
+                await store.refresh(trigger: .periodic)
+            }
         }
         .alert(
             "Hermes Gateway",
@@ -569,15 +700,21 @@ struct MessagesListView: View {
         }
     }
 
-    private func connectGateway() async {
+    private func connectGateway(trigger: GatewaySyncTrigger) async {
         do {
             let client = try gatewayConfiguration.client()
-            try await store.connect(to: client)
+            try await store.connect(to: client, trigger: trigger)
             gatewayConfiguration.errorMessage = nil
             showingGatewaySetup = false
         } catch {
-            gatewayConfiguration.errorMessage = error.localizedDescription
-            showingGatewaySetup = true
+            if error is CancellationError { return }
+            if GatewaySyncPolicy.shouldPresentConnectionError(
+                trigger: trigger,
+                hasCachedSnapshot: store.hasCachedSnapshot
+            ) {
+                gatewayConfiguration.errorMessage = error.localizedDescription
+                showingGatewaySetup = true
+            }
         }
     }
 

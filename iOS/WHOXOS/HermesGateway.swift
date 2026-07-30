@@ -413,7 +413,7 @@ private enum KeychainSecret {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: Data(value.utf8),
         ] as CFDictionary, nil)
         guard status == errSecSuccess else {
@@ -431,6 +431,16 @@ private enum KeychainSecret {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ] as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data else { return nil }
+        SecItemUpdate(
+            [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+            ] as CFDictionary,
+            [
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            ] as CFDictionary
+        )
         return String(data: data, encoding: .utf8)
     }
 

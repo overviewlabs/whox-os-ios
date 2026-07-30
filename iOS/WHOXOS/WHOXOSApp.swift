@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct WHOXOSApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = MessageStore()
     @State private var gatewayConfiguration = GatewayConfiguration()
 
