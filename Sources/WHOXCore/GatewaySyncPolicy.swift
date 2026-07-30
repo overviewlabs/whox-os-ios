@@ -57,13 +57,38 @@ public enum GatewaySyncPolicy {
         !isKnownSession && source == "api_server"
     }
 
+    public static func canImportPotentialHelper(
+        source: String?,
+        inspectionSucceeded: Bool
+    ) -> Bool {
+        source != "api_server" || inspectionSucceeded
+    }
+
+    public static func descendants(
+        of roots: Set<String>,
+        parentBySessionID: [String: String]
+    ) -> Set<String> {
+        var result = roots
+        var changed = true
+        while changed {
+            changed = false
+            for (sessionID, parentID) in parentBySessionID
+                where !result.contains(sessionID) && result.contains(parentID) {
+                result.insert(sessionID)
+                changed = true
+            }
+        }
+        return result
+    }
+
     public static func isUnread(
         previousActivity: Double?,
         currentActivity: Double,
         isActive: Bool,
-        wasUnread: Bool
+        wasUnread: Bool,
+        consumesReadBaseline: Bool = false
     ) -> Bool {
-        guard !isActive else { return false }
+        guard !isActive, !consumesReadBaseline else { return false }
         guard let previousActivity else { return wasUnread }
         return wasUnread || currentActivity > previousActivity
     }

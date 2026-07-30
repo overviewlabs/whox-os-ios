@@ -84,6 +84,7 @@ final class MessageStore {
     @ObservationIgnored private var syncInProgress = false
     @ObservationIgnored private var connectionGeneration = 0
     @ObservationIgnored private var loadingSessionTokens: [Conversation.ID: UUID] = [:]
+    @ObservationIgnored private var pendingReadActivityBaselineSessionIDs: Set<Conversation.ID> = []
     @ObservationIgnored private var lastReadAssistantIDs =
         UserDefaults.standard.dictionary(forKey: MessageStore.lastReadAssistantIDsKey)
             as? [String: String] ?? [:]
@@ -156,6 +157,7 @@ final class MessageStore {
                 hermesMessages: []
             )
             if let existing {
+                let consumesReadBaseline = pendingReadActivityBaselineSessionIDs.remove(session.id) != nil
                 conversation.messages = existing.messages
                 conversation.isMuted = existing.isMuted
                 conversation.isPinned = existing.isPinned
@@ -163,7 +165,8 @@ final class MessageStore {
                     previousActivity: existing.activityTimestamp,
                     currentActivity: session.activityTimestamp,
                     isActive: activeConversationID == session.id,
-                    wasUnread: existing.isUnread
+                    wasUnread: existing.isUnread,
+                    consumesReadBaseline: consumesReadBaseline
                 )
             }
             imported.append(conversation)
@@ -175,39 +178,49 @@ final class MessageStore {
 
         guard !deferred.isEmpty else { return }
         var hydratedByID: [String: [HermesMessage]] = [:]
-        var leakedSessionIDs: Set<String> = []
+        var directLeakedSessionIDs: Set<String> = []
+        var unresolvedSessionIDs: Set<String> = []
         for session in deferred where session.source == "api_server" {
             do {
                 let messages = try await client.messages(sessionID: session.id)
                 try ensureCurrentConnection(startedGeneration)
                 hydratedByID[session.id] = messages
                 if Self.isLeakedTitleHelperSession(messages) {
-                    leakedSessionIDs.insert(session.id)
+                    directLeakedSessionIDs.insert(session.id)
                 }
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                // A transient transcript failure must not hide a real session.
+                // Keep unclassified sessions hidden and retry on the next index refresh.
+                unresolvedSessionIDs.insert(session.id)
             }
         }
 
-        var foundDescendant = true
-        while foundDescendant {
-            foundDescendant = false
-            for session in deferred {
-                guard
-                    !leakedSessionIDs.contains(session.id),
-                    let parentID = session.parentSessionID,
-                    leakedSessionIDs.contains(parentID)
-                else {
-                    continue
-                }
-                leakedSessionIDs.insert(session.id)
-                foundDescendant = true
+        let parentBySessionID = Dictionary(
+            uniqueKeysWithValues: sessions.compactMap { session in
+                session.parentSessionID.map { (session.id, $0) }
             }
-        }
+        )
+        let leakedSessionIDs = GatewaySyncPolicy.descendants(
+            of: directLeakedSessionIDs,
+            parentBySessionID: parentBySessionID
+        )
+        unresolvedSessionIDs = GatewaySyncPolicy.descendants(
+            of: unresolvedSessionIDs,
+            parentBySessionID: parentBySessionID
+        )
 
-        for session in deferred where !leakedSessionIDs.contains(session.id) {
+        for session in deferred {
+            guard
+                !leakedSessionIDs.contains(session.id),
+                !unresolvedSessionIDs.contains(session.id),
+                GatewaySyncPolicy.canImportPotentialHelper(
+                    source: session.source,
+                    inspectionSucceeded: hydratedByID[session.id] != nil
+                )
+            else {
+                continue
+            }
             let messages = hydratedByID[session.id] ?? []
             conversations.append(Conversation(
                 hermesSession: session,
@@ -308,6 +321,7 @@ final class MessageStore {
         sendingSessionIDs = []
         loadingSessionTokens = [:]
         loadingSessionIDs = []
+        pendingReadActivityBaselineSessionIDs = []
         errorMessage = nil
     }
 
@@ -328,10 +342,12 @@ final class MessageStore {
         conversations.insert(updated, at: 0)
 
         guard let gatewayClient else { return }
+        let startedGeneration = connectionGeneration
         sendingSessionIDs.insert(id)
         defer { sendingSessionIDs.remove(id) }
         do {
             let reply = try await gatewayClient.chat(sessionID: id, input: clean)
+            try ensureCurrentConnection(startedGeneration)
             guard let currentIndex = conversations.firstIndex(where: { $0.id == id }) else { return }
             let message = ChatMessage(hermesMessage: reply)
             conversations[currentIndex].messages.append(message)
@@ -339,10 +355,19 @@ final class MessageStore {
             conversations[currentIndex].timestamp = Self.timeFormatter.string(from: message.timestamp)
             if activeConversationID == id {
                 markLatestAssistantRead(in: id)
+                pendingReadActivityBaselineSessionIDs.insert(id)
+                if let session = try? await gatewayClient.session(id) {
+                    try ensureCurrentConnection(startedGeneration)
+                    guard let refreshedIndex = conversations.firstIndex(where: { $0.id == id }) else { return }
+                    conversations[refreshedIndex].activityTimestamp = session.activityTimestamp
+                    pendingReadActivityBaselineSessionIDs.remove(id)
+                }
             } else {
                 conversations[currentIndex].isUnread = true
             }
             Task { await refreshHermesGeneratedTitle(for: id) }
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -46,6 +46,14 @@ import Testing
     #expect(GatewaySyncPolicy.shouldInspectPotentialHelper(source: "api_server", isKnownSession: false))
     #expect(!GatewaySyncPolicy.shouldInspectPotentialHelper(source: "api_server", isKnownSession: true))
     #expect(!GatewaySyncPolicy.shouldInspectPotentialHelper(source: "cli", isKnownSession: false))
+    #expect(!GatewaySyncPolicy.canImportPotentialHelper(
+        source: "api_server",
+        inspectionSucceeded: false
+    ))
+    #expect(GatewaySyncPolicy.canImportPotentialHelper(
+        source: "api_server",
+        inspectionSucceeded: true
+    ))
 }
 
 @Test func metadataActivityMarksInactiveSessionsUnread() {
@@ -67,6 +75,22 @@ import Testing
         isActive: false,
         wasUnread: true
     ))
+    #expect(!GatewaySyncPolicy.isUnread(
+        previousActivity: 10,
+        currentActivity: 11,
+        isActive: false,
+        wasUnread: false,
+        consumesReadBaseline: true
+    ))
+}
+
+@Test func unresolvedHelperClassificationDefersDescendants() {
+    let deferred = GatewaySyncPolicy.descendants(
+        of: ["helper"],
+        parentBySessionID: ["child": "helper", "grandchild": "child", "other": "root"]
+    )
+
+    #expect(deferred == ["helper", "child", "grandchild"])
 }
 
 @Test func realtimeAndBackgroundRefreshCadenceStayWithinIOSLimits() {
