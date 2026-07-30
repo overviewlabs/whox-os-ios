@@ -33,6 +33,7 @@ struct Conversation: Identifiable, Hashable, Codable {
     var isUnread: Bool
     var model: String?
     var source: String?
+    var activityTimestamp: Double?
 
     init(
         id: String = UUID().uuidString.lowercased(),
@@ -45,7 +46,8 @@ struct Conversation: Identifiable, Hashable, Codable {
         isPinned: Bool = false,
         isUnread: Bool = false,
         model: String? = nil,
-        source: String? = nil
+        source: String? = nil,
+        activityTimestamp: Double? = nil
     ) {
         self.id = id
         self.name = name
@@ -58,6 +60,7 @@ struct Conversation: Identifiable, Hashable, Codable {
         self.isUnread = isUnread
         self.model = model
         self.source = source
+        self.activityTimestamp = activityTimestamp
     }
 }
 
@@ -65,24 +68,28 @@ struct Conversation: Identifiable, Hashable, Codable {
 @Observable
 final class MessageStore {
     private static let lastReadAssistantIDsKey = "hermes.sessions.last-read-assistant-ids"
-    private static let snapshotVersion = 1
+    private static let snapshotVersion = 2
 
     var conversations: [Conversation] {
         didSet { persistSnapshot() }
     }
     private(set) var hasCachedSnapshot: Bool
     var isSyncing = false
+    private(set) var isLoadingSessions = false
     var sendingSessionIDs: Set<String> = []
+    private(set) var loadingSessionIDs: Set<String> = []
     var errorMessage: String?
     @ObservationIgnored private var gatewayClient: HermesGatewayClient?
     @ObservationIgnored private var activeConversationID: Conversation.ID?
     @ObservationIgnored private var syncInProgress = false
     @ObservationIgnored private var connectionGeneration = 0
+    @ObservationIgnored private var loadingSessionTokens: [Conversation.ID: UUID] = [:]
     @ObservationIgnored private var lastReadAssistantIDs =
         UserDefaults.standard.dictionary(forKey: MessageStore.lastReadAssistantIDsKey)
             as? [String: String] ?? [:]
 
     init() {
+        Self.deleteLegacySnapshot()
         if let snapshot = Self.loadSnapshot() {
             conversations = snapshot.conversations
             hasCachedSnapshot = true
@@ -109,6 +116,7 @@ final class MessageStore {
         try ensureCurrentGeneration(startedGeneration)
         gatewayClient = client
         syncInProgress = true
+        isLoadingSessions = true
         isSyncing = GatewaySyncPolicy.presentation(
             for: trigger,
             hasCachedSnapshot: hasCachedSnapshot
@@ -116,82 +124,113 @@ final class MessageStore {
         errorMessage = nil
         defer {
             isSyncing = false
+            isLoadingSessions = false
             syncInProgress = false
         }
 
         let sessions = try await client.listAllSessions()
         try ensureCurrentConnection(startedGeneration)
-        var loadedSessions: [(session: HermesSession, messages: [HermesMessage])] = []
-        loadedSessions.reserveCapacity(sessions.count)
-        for session in sessions {
-            let messages: [HermesMessage]
-            do {
-                messages = try await client.messages(sessionID: session.id)
-            } catch {
-                try Task.checkCancellation()
-                messages = []
-            }
-            try ensureCurrentConnection(startedGeneration)
-            loadedSessions.append((session, messages))
-        }
 
-        var leakedSessionIDs = Set(
-            loadedSessions.compactMap {
-                Self.isLeakedTitleHelperSession($0.messages) ? $0.session.id : nil
-            }
+        let loadPlan = GatewaySessionLoadPlan.indexRefresh(
+            sessionIDs: sessions.map(\.id)
         )
-        var foundDescendant = true
-        while foundDescendant {
-            foundDescendant = false
-            for item in loadedSessions {
-                guard
-                    !leakedSessionIDs.contains(item.session.id),
-                    let parentID = item.session.parentSessionID,
-                    leakedSessionIDs.contains(parentID)
-                else {
-                    continue
-                }
-                leakedSessionIDs.insert(item.session.id)
-                foundDescendant = true
-            }
-        }
-
+        let existingByID = Dictionary(
+            uniqueKeysWithValues: conversations.map { ($0.id, $0) }
+        )
+        var deferred: [HermesSession] = []
         var imported: [Conversation] = []
-        imported.reserveCapacity(sessions.count)
-        for item in loadedSessions {
-            if leakedSessionIDs.contains(item.session.id) {
-                try ensureCurrentConnection(startedGeneration)
-                try? await client.deleteSession(item.session.id)
-                try ensureCurrentConnection(startedGeneration)
+        imported.reserveCapacity(loadPlan.sessionIDs.count)
+        for session in sessions {
+            let existing = existingByID[session.id]
+            if existing == nil,
+               (GatewaySyncPolicy.shouldInspectPotentialHelper(
+                   source: session.source,
+                   isKnownSession: false
+               ) || session.parentSessionID != nil) {
+                deferred.append(session)
                 continue
             }
+
             var conversation = Conversation(
-                hermesSession: item.session,
-                hermesMessages: item.messages
+                hermesSession: session,
+                hermesMessages: []
             )
-            if let latestAssistantID = Self.latestAssistantID(in: item.messages) {
-                if activeConversationID == item.session.id {
-                    lastReadAssistantIDs[item.session.id] = latestAssistantID
-                } else if let lastReadID = lastReadAssistantIDs[item.session.id] {
-                    conversation.isUnread = lastReadID != latestAssistantID
-                } else {
-                    // Treat the first sync as a baseline instead of marking every old session unread.
-                    lastReadAssistantIDs[item.session.id] = latestAssistantID
-                }
+            if let existing {
+                conversation.messages = existing.messages
+                conversation.isMuted = existing.isMuted
+                conversation.isPinned = existing.isPinned
+                conversation.isUnread = GatewaySyncPolicy.isUnread(
+                    previousActivity: existing.activityTimestamp,
+                    currentActivity: session.activityTimestamp,
+                    isActive: activeConversationID == session.id,
+                    wasUnread: existing.isUnread
+                )
             }
             imported.append(conversation)
         }
         try ensureCurrentConnection(startedGeneration)
-        persistReadState()
 
         hasCachedSnapshot = true
         conversations = imported
+
+        guard !deferred.isEmpty else { return }
+        var hydratedByID: [String: [HermesMessage]] = [:]
+        var leakedSessionIDs: Set<String> = []
+        for session in deferred where session.source == "api_server" {
+            do {
+                let messages = try await client.messages(sessionID: session.id)
+                try ensureCurrentConnection(startedGeneration)
+                hydratedByID[session.id] = messages
+                if Self.isLeakedTitleHelperSession(messages) {
+                    leakedSessionIDs.insert(session.id)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A transient transcript failure must not hide a real session.
+            }
+        }
+
+        var foundDescendant = true
+        while foundDescendant {
+            foundDescendant = false
+            for session in deferred {
+                guard
+                    !leakedSessionIDs.contains(session.id),
+                    let parentID = session.parentSessionID,
+                    leakedSessionIDs.contains(parentID)
+                else {
+                    continue
+                }
+                leakedSessionIDs.insert(session.id)
+                foundDescendant = true
+            }
+        }
+
+        for session in deferred where !leakedSessionIDs.contains(session.id) {
+            let messages = hydratedByID[session.id] ?? []
+            conversations.append(Conversation(
+                hermesSession: session,
+                hermesMessages: messages
+            ))
+            if let latestAssistantID = Self.latestAssistantID(in: messages) {
+                lastReadAssistantIDs[session.id] = latestAssistantID
+            }
+        }
+        conversations.sort { ($0.activityTimestamp ?? 0) > ($1.activityTimestamp ?? 0) }
+        persistReadState()
+
+        for sessionID in leakedSessionIDs {
+            try ensureCurrentConnection(startedGeneration)
+            try? await client.deleteSession(sessionID)
+        }
+        try ensureCurrentConnection(startedGeneration)
     }
 
     @discardableResult
     func refresh(trigger: GatewaySyncTrigger = .periodic) async -> Bool {
         guard let gatewayClient else { return false }
-        guard sendingSessionIDs.isEmpty else { return true }
+        guard sendingSessionIDs.isEmpty, loadingSessionIDs.isEmpty else { return true }
         do {
             try await connect(to: gatewayClient, trigger: trigger)
             return true
@@ -203,19 +242,84 @@ final class MessageStore {
         }
     }
 
+    func loadMessages(for sessionID: Conversation.ID) async {
+        guard let client = gatewayClient else { return }
+        guard loadingSessionTokens[sessionID] == nil else { return }
+        let startedGeneration = connectionGeneration
+        let loadingToken = UUID()
+        loadingSessionTokens[sessionID] = loadingToken
+        loadingSessionIDs.insert(sessionID)
+        defer {
+            if loadingSessionTokens[sessionID] == loadingToken {
+                loadingSessionTokens[sessionID] = nil
+                loadingSessionIDs.remove(sessionID)
+            }
+        }
+
+        do {
+            while syncInProgress {
+                try await Task.sleep(for: .milliseconds(50))
+                try ensureCurrentConnection(startedGeneration)
+            }
+            let loadPlan = GatewaySessionLoadPlan.openSession(sessionID)
+            guard loadPlan.messageSessionIDs == [sessionID] else { return }
+
+            let messages = try await client.messages(sessionID: sessionID)
+            try ensureCurrentConnection(startedGeneration)
+            guard let index = conversations.firstIndex(where: { $0.id == sessionID }) else { return }
+
+            let mapped = messages
+                .filter {
+                    ($0.role == "user" || $0.role == "assistant")
+                        && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }
+                .map(ChatMessage.init(hermesMessage:))
+            conversations[index].messages = mapped
+            if let latest = mapped.last {
+                conversations[index].preview = latest.text
+                conversations[index].timestamp = Self.timeFormatter.string(from: latest.timestamp)
+            }
+            if let latestAssistantID = Self.latestAssistantID(in: messages) {
+                if activeConversationID == sessionID {
+                    lastReadAssistantIDs[sessionID] = latestAssistantID
+                    conversations[index].isUnread = false
+                } else if let lastReadID = lastReadAssistantIDs[sessionID] {
+                    conversations[index].isUnread = lastReadID != latestAssistantID
+                } else {
+                    lastReadAssistantIDs[sessionID] = latestAssistantID
+                }
+                persistReadState()
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func disconnect() {
         connectionGeneration &+= 1
         gatewayClient = nil
         hasCachedSnapshot = false
         Self.deleteSnapshot()
         conversations = []
+        isSyncing = false
+        isLoadingSessions = false
         sendingSessionIDs = []
+        loadingSessionTokens = [:]
+        loadingSessionIDs = []
         errorMessage = nil
     }
 
     func send(_ text: String, to id: Conversation.ID) async {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        guard
+            !clean.isEmpty,
+            !loadingSessionIDs.contains(id),
+            let index = conversations.firstIndex(where: { $0.id == id })
+        else {
+            return
+        }
         conversations[index].messages.append(ChatMessage(sender: .user, text: clean))
         conversations[index].preview = clean
         conversations[index].timestamp = Self.timeFormatter.string(from: .now)
@@ -409,6 +513,11 @@ final class MessageStore {
         }
         return directory
             .appendingPathComponent("WHOXOS", isDirectory: true)
+            .appendingPathComponent("hermes-sessions-v2.json", isDirectory: false)
+    }
+
+    private static var legacySnapshotURL: URL? {
+        snapshotURL?.deletingLastPathComponent()
             .appendingPathComponent("hermes-sessions.json", isDirectory: false)
     }
 
@@ -452,6 +561,11 @@ final class MessageStore {
         try? FileManager.default.removeItem(at: url)
     }
 
+    private static func deleteLegacySnapshot() {
+        guard let url = legacySnapshotURL else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     fileprivate static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
@@ -487,7 +601,8 @@ private extension Conversation {
             timestamp: MessageStore.timeFormatter.string(from: activityDate),
             messages: mappedMessages,
             model: session.model,
-            source: session.source
+            source: session.source,
+            activityTimestamp: session.activityTimestamp
         )
     }
 
@@ -537,6 +652,16 @@ struct MessagesListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                if visibleConversations.isEmpty && store.isLoadingSessions {
+                    HStack {
+                        Spacer()
+                        ProgressView("Loading sessions…")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                    .padding(.top, 48)
+                }
                 ForEach(visibleConversations) { conversation in
                     VStack(spacing: 0) {
                         NavigationLink(value: conversation.id) {
@@ -867,6 +992,10 @@ struct ConversationView: View {
         store.sendingSessionIDs.contains(conversationID)
     }
 
+    private var isLoading: Bool {
+        store.loadingSessionIDs.contains(conversationID)
+    }
+
     var body: some View {
         transcript
             .nativeSafeAreaBar(edge: .top) {
@@ -882,6 +1011,9 @@ struct ConversationView: View {
             }
             .onDisappear {
                 store.closeConversation(conversationID)
+            }
+            .task(id: conversationID) {
+                await store.loadMessages(for: conversationID)
             }
     }
 
@@ -939,6 +1071,12 @@ struct ConversationView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.bottom, 3)
+                    }
+                    if isLoading && (conversation?.messages.isEmpty ?? true) {
+                        ProgressView("Loading session…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 28)
                     }
                     ForEach(conversation?.messages ?? []) { message in
                         VStack(alignment: message.sender == .user ? .trailing : .leading, spacing: 3) {
@@ -1091,9 +1229,11 @@ struct ConversationView: View {
         .padding(.horizontal, 17)
         .padding(.top, 7)
         .padding(.bottom, 1)
+        .disabled(isLoading)
     }
 
     private func send() {
+        guard !isLoading else { return }
         let value = draft
         withAnimation(.whoxSmooth) {
             draft = ""

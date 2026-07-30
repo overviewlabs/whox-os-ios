@@ -26,6 +26,49 @@ import Testing
     #expect(!GatewaySyncPolicy.canCommit(startedGeneration: 7, currentGeneration: 8))
 }
 
+@Test func sessionIndexRefreshDoesNotFetchEveryTranscript() {
+    let plan = GatewaySessionLoadPlan.indexRefresh(
+        sessionIDs: ["s1", "s2", "s3"]
+    )
+
+    #expect(plan.sessionIDs == ["s1", "s2", "s3"])
+    #expect(plan.messageSessionIDs.isEmpty)
+}
+
+@Test func openingASessionFetchesOnlyItsTranscript() {
+    let plan = GatewaySessionLoadPlan.openSession("s2")
+
+    #expect(plan.sessionIDs.isEmpty)
+    #expect(plan.messageSessionIDs == ["s2"])
+}
+
+@Test func onlyNewAPISessionsRequireInternalHelperInspection() {
+    #expect(GatewaySyncPolicy.shouldInspectPotentialHelper(source: "api_server", isKnownSession: false))
+    #expect(!GatewaySyncPolicy.shouldInspectPotentialHelper(source: "api_server", isKnownSession: true))
+    #expect(!GatewaySyncPolicy.shouldInspectPotentialHelper(source: "cli", isKnownSession: false))
+}
+
+@Test func metadataActivityMarksInactiveSessionsUnread() {
+    #expect(GatewaySyncPolicy.isUnread(
+        previousActivity: 10,
+        currentActivity: 11,
+        isActive: false,
+        wasUnread: false
+    ))
+    #expect(!GatewaySyncPolicy.isUnread(
+        previousActivity: 10,
+        currentActivity: 11,
+        isActive: true,
+        wasUnread: false
+    ))
+    #expect(GatewaySyncPolicy.isUnread(
+        previousActivity: 11,
+        currentActivity: 11,
+        isActive: false,
+        wasUnread: true
+    ))
+}
+
 @Test func realtimeAndBackgroundRefreshCadenceStayWithinIOSLimits() {
     #expect(GatewaySyncPolicy.foregroundRefreshInterval == 5)
     #expect(GatewaySyncPolicy.minimumBackgroundRefreshInterval >= 15 * 60)

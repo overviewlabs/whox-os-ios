@@ -13,6 +13,19 @@ public enum GatewaySyncPresentation: Sendable, Equatable {
     case blocking
 }
 
+public struct GatewaySessionLoadPlan: Sendable, Equatable {
+    public let sessionIDs: [String]
+    public let messageSessionIDs: [String]
+
+    public static func indexRefresh(sessionIDs: [String]) -> Self {
+        Self(sessionIDs: sessionIDs, messageSessionIDs: [])
+    }
+
+    public static func openSession(_ sessionID: String) -> Self {
+        Self(sessionIDs: [], messageSessionIDs: [sessionID])
+    }
+}
+
 public enum GatewaySyncPolicy {
     public static let foregroundRefreshInterval: TimeInterval = 5
     public static let minimumBackgroundRefreshInterval: TimeInterval = 15 * 60
@@ -35,5 +48,23 @@ public enum GatewaySyncPolicy {
 
     public static func canCommit(startedGeneration: Int, currentGeneration: Int) -> Bool {
         startedGeneration == currentGeneration
+    }
+
+    public static func shouldInspectPotentialHelper(
+        source: String?,
+        isKnownSession: Bool
+    ) -> Bool {
+        !isKnownSession && source == "api_server"
+    }
+
+    public static func isUnread(
+        previousActivity: Double?,
+        currentActivity: Double,
+        isActive: Bool,
+        wasUnread: Bool
+    ) -> Bool {
+        guard !isActive else { return false }
+        guard let previousActivity else { return wasUnread }
+        return wasUnread || currentActivity > previousActivity
     }
 }
