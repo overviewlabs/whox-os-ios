@@ -7,44 +7,40 @@ extension Notification.Name {
     static let openWHOXSession = Notification.Name("com.whox.whoxos.open-session")
 }
 
-private struct PushDeviceBody: Encodable {
-    let deviceToken: String
-}
+private final class NotificationRuntimeState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var activeSessionID: String?
+    private var mutedSessionIDs: Set<String> = []
+    private var seenEvents: [String: Date] = [:]
+    private var pendingSessionID: String?
 
-private struct PushStateBody: Encodable, Equatable {
-    let deviceToken: String
-    let isForeground: Bool
-    let activeSessionID: String?
-    let unreadSessionIDs: [String]
-    let mutedSessionIDs: [String]
-}
-
-private struct PushNotificationClient: Sendable {
-    private let baseURL = URL(string: "https://mobile-api.whox.ai")!
-    let gatewayKey: String
-
-    func register(deviceToken: String) async throws {
-        try await send(path: "/v1/push/devices", method: "POST", body: PushDeviceBody(deviceToken: deviceToken))
+    func update(activeSessionID: String?, mutedSessionIDs: [String]) {
+        lock.withLock {
+            self.activeSessionID = activeSessionID
+            self.mutedSessionIDs = Set(mutedSessionIDs)
+        }
     }
 
-    func update(state: PushStateBody) async throws {
-        try await send(path: "/v1/push/state", method: "PUT", body: state)
+    func shouldPresent(sessionID: String?, eventID: String) -> Bool {
+        lock.withLock {
+            let cutoff = Date().addingTimeInterval(-600)
+            seenEvents = seenEvents.filter { $0.value >= cutoff }
+            guard seenEvents[eventID] == nil else { return false }
+            seenEvents[eventID] = Date()
+            guard let sessionID, !sessionID.isEmpty else { return true }
+            return sessionID != activeSessionID && !mutedSessionIDs.contains(sessionID)
+        }
     }
 
-    func unregister(deviceToken: String) async throws {
-        try await send(path: "/v1/push/devices", method: "DELETE", body: PushDeviceBody(deviceToken: deviceToken))
+    func stagePendingSessionID(_ sessionID: String?) {
+        guard let sessionID, !sessionID.isEmpty else { return }
+        lock.withLock { pendingSessionID = sessionID }
     }
 
-    private func send<Body: Encodable>(path: String, method: String, body: Body) async throws {
-        var request = URLRequest(url: baseURL.appending(path: path))
-        request.httpMethod = method
-        request.timeoutInterval = 15
-        request.setValue("Bearer \(gatewayKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            throw URLError(.badServerResponse)
+    func consumePendingSessionID() -> String? {
+        lock.withLock {
+            defer { pendingSessionID = nil }
+            return pendingSessionID
         }
     }
 }
@@ -54,14 +50,13 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
     static let shared = NotificationCoordinator()
 
     private let center = UNUserNotificationCenter.current()
-    private var deviceToken: String?
-    private var lastState: PushStateBody?
-    private var lastPresenceSentAt = Date.distantPast
-    private var synchronizationTask: Task<Void, Never>?
-    private var pendingSessionID: String?
+    nonisolated private let runtimeState = NotificationRuntimeState()
+
+    func configure() {
+        center.delegate = self
+    }
 
     func requestAuthorizationAndRegister() async {
-        center.delegate = self
         let settings = await center.notificationSettings()
         let authorized: Bool
         switch settings.authorizationStatus {
@@ -80,8 +75,8 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
     }
 
     func didRegister(deviceToken data: Data) {
-        deviceToken = data.map { String(format: "%02x", $0) }.joined()
-        lastState = nil
+        // Remote registration remains local until the device-bound mobile relay contract is available.
+        _ = data
     }
 
     func didFailToRegister(error: Error) {
@@ -91,87 +86,51 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
     }
 
     func synchronize(
-        gatewayKey: String,
         isForeground: Bool,
         activeSessionID: String?,
         unreadSessionIDs: [String],
         mutedSessionIDs: [String]
     ) {
-        let uniqueUnread = Array(Set(unreadSessionIDs)).sorted()
-        let badgeCount = GatewayNotificationPolicy.badgeCount(unreadSessionIDs: uniqueUnread)
-        Task {
-            try? await center.setBadgeCount(badgeCount)
-        }
-
-        guard let deviceToken, !gatewayKey.isEmpty else { return }
-        let state = PushStateBody(
-            deviceToken: deviceToken,
-            isForeground: isForeground,
+        runtimeState.update(
             activeSessionID: isForeground ? activeSessionID : nil,
-            unreadSessionIDs: uniqueUnread,
-            mutedSessionIDs: Array(Set(mutedSessionIDs)).sorted()
+            mutedSessionIDs: mutedSessionIDs
         )
-        let now = Date()
-        guard state != lastState || now.timeIntervalSince(lastPresenceSentAt) >= 25 else { return }
-        lastState = state
-        lastPresenceSentAt = now
-        synchronizationTask?.cancel()
-        synchronizationTask = Task {
-            do {
-                let client = PushNotificationClient(gatewayKey: gatewayKey)
-                try await client.register(deviceToken: deviceToken)
-                try Task.checkCancellation()
-                try await client.update(state: state)
-            } catch is CancellationError {
-                return
-            } catch {
-                #if DEBUG
-                print("Push state synchronization failed: \(error.localizedDescription)")
-                #endif
-                lastState = nil
-            }
-        }
+        let badgeCount = GatewayNotificationPolicy.badgeCount(unreadSessionIDs: unreadSessionIDs)
+        Task { try? await center.setBadgeCount(badgeCount) }
     }
 
-    func unregister(gatewayKey: String) {
-        guard let deviceToken, !gatewayKey.isEmpty else { return }
-        synchronizationTask?.cancel()
-        Task {
-            try? await PushNotificationClient(gatewayKey: gatewayKey).unregister(deviceToken: deviceToken)
-        }
-        lastState = nil
+    func unregister() {
+        runtimeState.update(activeSessionID: nil, mutedSessionIDs: [])
     }
 
     func consumePendingSessionID() -> String? {
-        defer { pendingSessionID = nil }
-        return pendingSessionID
+        runtimeState.consumePendingSessionID()
     }
 
     func deliverBackgroundFallback(for conversations: [Conversation], badgeCount: Int) async {
-        guard !conversations.isEmpty else {
-            try? await center.setBadgeCount(badgeCount)
-            return
-        }
-        let delivered = await center.deliveredNotifications()
-        let pending = await center.pendingNotificationRequests()
-        let existingSessionIDs = Set(
-            delivered.compactMap { $0.request.content.userInfo["sessionID"] as? String } +
-                pending.compactMap { $0.content.userInfo["sessionID"] as? String }
-        )
-        for conversation in conversations where !existingSessionIDs.contains(conversation.id) {
+        let deliveredIDs = Set(await center.deliveredNotifications().map(\.request.identifier))
+        let pendingIDs = Set(await center.pendingNotificationRequests().map(\.identifier))
+        let existingIDs = deliveredIDs.union(pendingIDs)
+
+        for conversation in conversations {
+            guard let activityTimestamp = conversation.activityTimestamp else { continue }
+            let activityID = String(Int64(activityTimestamp * 1_000))
+            let identifier = "background-fallback.\(conversation.id).\(activityID)"
+            guard !existingIDs.contains(identifier) else { continue }
+
             let content = UNMutableNotificationContent()
             content.title = "New WHOX OS message"
-            content.body = conversation.preview.isEmpty ? "A session has a new message." : conversation.preview
+            content.body = "A session has new activity."
             content.sound = .default
             content.badge = NSNumber(value: badgeCount)
             content.threadIdentifier = conversation.id
-            content.userInfo = ["sessionID": conversation.id]
-            let request = UNNotificationRequest(
-                identifier: "background-fallback.\(conversation.id)",
-                content: content,
-                trigger: nil
+            content.userInfo = [
+                "sessionID": conversation.id,
+                "eventID": identifier,
+            ]
+            try? await center.add(
+                UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
             )
-            try? await center.add(request)
         }
         try? await center.setBadgeCount(badgeCount)
     }
@@ -181,6 +140,13 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        let userInfo = notification.request.content.userInfo
+        let sessionID = userInfo["sessionID"] as? String
+        let eventID = (userInfo["eventID"] as? String) ?? notification.request.identifier
+        guard runtimeState.shouldPresent(sessionID: sessionID, eventID: eventID) else {
+            completionHandler([.badge])
+            return
+        }
         completionHandler([.banner, .list, .sound, .badge])
         Task { @MainActor in
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -193,12 +159,12 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let sessionID = response.notification.request.content.userInfo["sessionID"] as? String
-        completionHandler()
+        runtimeState.stagePendingSessionID(sessionID)
         Task { @MainActor in
             if let sessionID, !sessionID.isEmpty {
-                pendingSessionID = sessionID
                 NotificationCenter.default.post(name: .openWHOXSession, object: sessionID)
             }
         }
+        completionHandler()
     }
 }

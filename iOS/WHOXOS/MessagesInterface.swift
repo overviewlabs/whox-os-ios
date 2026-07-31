@@ -80,7 +80,7 @@ final class MessageStore {
     private(set) var loadingSessionIDs: Set<String> = []
     var errorMessage: String?
     @ObservationIgnored private var gatewayClient: HermesGatewayClient?
-    @ObservationIgnored private(set) var activeConversationID: Conversation.ID?
+    private(set) var activeConversationID: Conversation.ID?
     @ObservationIgnored private var syncInProgress = false
     @ObservationIgnored private var connectionGeneration = 0
     @ObservationIgnored private var loadingSessionTokens: [Conversation.ID: UUID] = [:]
@@ -813,7 +813,7 @@ struct MessagesListView: View {
             GatewaySetupView(
                 onConnect: { await connectGateway(trigger: .manualConnection) },
                 onDisconnect: {
-                    NotificationCoordinator.shared.unregister(gatewayKey: gatewayConfiguration.apiKey)
+                    NotificationCoordinator.shared.unregister()
                     store.disconnect()
                     showingGatewaySetup = false
                 }
@@ -881,7 +881,6 @@ struct MessagesListView: View {
 
     private func synchronizeNotifications() {
         NotificationCoordinator.shared.synchronize(
-            gatewayKey: gatewayConfiguration.apiKey,
             isForeground: scenePhase == .active,
             activeSessionID: store.activeConversationID,
             unreadSessionIDs: unreadSessionIDs,
@@ -904,6 +903,7 @@ struct MessagesListView: View {
         do {
             let client = try gatewayConfiguration.client()
             try await store.connect(to: client, trigger: trigger)
+            synchronizeNotifications()
             gatewayConfiguration.errorMessage = nil
             showingGatewaySetup = false
         } catch {

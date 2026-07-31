@@ -93,7 +93,6 @@ final class BackgroundSyncCoordinator {
                 )
             )
             NotificationCoordinator.shared.synchronize(
-                gatewayKey: gatewayConfiguration.apiKey,
                 isForeground: false,
                 activeSessionID: nil,
                 unreadSessionIDs: unread.map(\.id),
@@ -112,6 +111,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        NotificationCoordinator.shared.configure()
         BackgroundSyncCoordinator.shared.register()
         Task {
             await NotificationCoordinator.shared.requestAuthorizationAndRegister()
