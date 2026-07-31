@@ -181,9 +181,9 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        completionHandler([.banner, .list, .sound, .badge])
         Task { @MainActor in
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            completionHandler([.banner, .list, .sound, .badge])
         }
     }
 
@@ -193,12 +193,12 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let sessionID = response.notification.request.content.userInfo["sessionID"] as? String
+        completionHandler()
         Task { @MainActor in
             if let sessionID, !sessionID.isEmpty {
                 pendingSessionID = sessionID
                 NotificationCenter.default.post(name: .openWHOXSession, object: sessionID)
             }
-            completionHandler()
         }
     }
 }
