@@ -5,6 +5,8 @@ struct GatewaySetupView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var gatewayURL = ""
     @State private var apiKey = ""
+    @State private var accountEmail = ""
+    @State private var accountPassword = ""
     @State private var loadedSavedValues = false
     let onConnect: () async -> Void
     let onDisconnect: () -> Void
@@ -24,6 +26,21 @@ struct GatewaySetupView: View {
                     Text("Hermes Gateway")
                 } footer: {
                     Text("Use the public HTTPS address for your Hermes API server. Profile routes such as /p/work are supported.")
+                }
+
+                Section {
+                    TextField("WHOX account email", text: $accountEmail)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                        .autocorrectionDisabled()
+                    SecureField("WHOX account password", text: $accountPassword)
+                        .textContentType(.password)
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text(MobilePushRelay.isProvisioned
+                        ? "This device already has a secured notification credential. Enter your account again only to replace it."
+                        : "Sign in once so notification banners can arrive through APNs while the app is switched away or closed. Your password is never stored.")
                 }
 
                 if let error = configuration.errorMessage {
@@ -50,6 +67,10 @@ struct GatewaySetupView: View {
                         configuration.isConnecting
                             || gatewayURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || (!MobilePushRelay.isProvisioned && (
+                                accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    || accountPassword.isEmpty
+                            ))
                     )
                 }
 
@@ -85,6 +106,7 @@ struct GatewaySetupView: View {
                 guard !loadedSavedValues else { return }
                 gatewayURL = configuration.gatewayURL
                 apiKey = configuration.apiKey
+                accountEmail = MobilePushRelay.savedEmail
                 loadedSavedValues = true
             }
         }
@@ -97,8 +119,12 @@ struct GatewaySetupView: View {
         Task {
             defer { configuration.isConnecting = false }
             do {
+                if !MobilePushRelay.isProvisioned || !accountPassword.isEmpty {
+                    try await MobilePushRelay.shared.signIn(email: accountEmail, password: accountPassword)
+                }
                 try configuration.save(url: gatewayURL, key: apiKey)
                 await onConnect()
+                accountPassword = ""
             } catch {
                 configuration.errorMessage = error.localizedDescription
             }

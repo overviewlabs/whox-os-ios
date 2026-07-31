@@ -114,6 +114,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         NotificationCoordinator.shared.configure()
         BackgroundSyncCoordinator.shared.register()
         Task {
+            await MobilePushRelay.shared.restoreAndRegisterIfPossible()
             await NotificationCoordinator.shared.requestAuthorizationAndRegister()
         }
         return true

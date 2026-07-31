@@ -404,7 +404,7 @@ final class GatewayConfiguration {
     }
 }
 
-private enum KeychainSecret {
+enum KeychainSecret {
     private static let service = "com.whox.whoxos.gateway"
 
     static func save(_ value: String, account: String) throws {

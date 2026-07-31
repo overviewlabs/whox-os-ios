@@ -75,8 +75,10 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
     }
 
     func didRegister(deviceToken data: Data) {
-        // Remote registration remains local until the device-bound mobile relay contract is available.
-        _ = data
+        let token = data.map { String(format: "%02x", $0) }.joined()
+        Task {
+            try? await MobilePushRelay.shared.register(deviceToken: token)
+        }
     }
 
     func didFailToRegister(error: Error) {
@@ -97,10 +99,19 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         )
         let badgeCount = GatewayNotificationPolicy.badgeCount(unreadSessionIDs: unreadSessionIDs)
         Task { try? await center.setBadgeCount(badgeCount) }
+        Task {
+            await MobilePushRelay.shared.synchronize(
+                isForeground: isForeground,
+                activeSessionID: activeSessionID,
+                unreadSessionIDs: unreadSessionIDs,
+                mutedSessionIDs: mutedSessionIDs
+            )
+        }
     }
 
     func unregister() {
         runtimeState.update(activeSessionID: nil, mutedSessionIDs: [])
+        Task { await MobilePushRelay.shared.unregister() }
     }
 
     func consumePendingSessionID() -> String? {
