@@ -905,7 +905,7 @@ struct MessagesListView: View {
             try await store.connect(to: client, trigger: trigger)
             synchronizeNotifications()
             gatewayConfiguration.errorMessage = nil
-            showingGatewaySetup = false
+            showingGatewaySetup = !MobilePushRelay.isProvisioned
         } catch {
             if error is CancellationError { return }
             if GatewaySyncPolicy.shouldPresentConnectionError(
