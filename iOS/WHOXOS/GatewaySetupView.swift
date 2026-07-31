@@ -57,8 +57,8 @@ struct GatewaySetupView: View {
                     Section {
                         Button("Disconnect Gateway", role: .destructive) {
                             withAnimation(.whoxSmooth) {
-                                configuration.disconnect()
                                 onDisconnect()
+                                configuration.disconnect()
                             }
                         }
                     }

@@ -26,6 +26,20 @@ public struct GatewaySessionLoadPlan: Sendable, Equatable {
     }
 }
 
+public enum GatewayNotificationPolicy {
+    public static func badgeCount(unreadSessionIDs: [String]) -> Int {
+        Set(unreadSessionIDs).count
+    }
+
+    public static func shouldAlert(
+        isRemoteMessage: Bool,
+        isActiveSession: Bool,
+        isMuted: Bool
+    ) -> Bool {
+        isRemoteMessage && !isActiveSession && !isMuted
+    }
+}
+
 public enum GatewaySyncPolicy {
     public static let foregroundRefreshInterval: TimeInterval = 5
     public static let minimumBackgroundRefreshInterval: TimeInterval = 15 * 60

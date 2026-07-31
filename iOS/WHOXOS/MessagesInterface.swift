@@ -674,6 +674,14 @@ struct MessagesListView: View {
         }
     }
 
+    private var unreadSessionIDs: [String] {
+        store.conversations.filter(\.isUnread).map(\.id).sorted()
+    }
+
+    private var mutedSessionIDs: [String] {
+        store.conversations.filter(\.isMuted).map(\.id).sorted()
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             List {
@@ -805,14 +813,29 @@ struct MessagesListView: View {
             GatewaySetupView(
                 onConnect: { await connectGateway(trigger: .manualConnection) },
                 onDisconnect: {
+                    NotificationCoordinator.shared.unregister(gatewayKey: gatewayConfiguration.apiKey)
                     store.disconnect()
                     showingGatewaySetup = false
                 }
             )
             .environment(gatewayConfiguration)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openWHOXSession)) { notification in
+            guard let sessionID = notification.object as? String else { return }
+            Task { await openNotificationSession(sessionID) }
+        }
+        .onChange(of: unreadSessionIDs) { _, _ in
+            synchronizeNotifications()
+        }
+        .onChange(of: mutedSessionIDs) { _, _ in
+            synchronizeNotifications()
+        }
+        .onChange(of: store.activeConversationID) { _, _ in
+            synchronizeNotifications()
+        }
         .task(id: scenePhase) {
             guard scenePhase == .active else {
+                synchronizeNotifications()
                 if scenePhase == .background {
                     BackgroundSyncCoordinator.shared.schedule()
                 }
@@ -820,11 +843,16 @@ struct MessagesListView: View {
             }
             guard gatewayConfiguration.isConfigured else {
                 showingGatewaySetup = true
+                synchronizeNotifications()
                 return
             }
             await connectGateway(
                 trigger: store.hasCachedSnapshot ? .foreground : .launch
             )
+            synchronizeNotifications()
+            if let sessionID = NotificationCoordinator.shared.consumePendingSessionID() {
+                await openNotificationSession(sessionID)
+            }
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(
@@ -834,6 +862,7 @@ struct MessagesListView: View {
                     return
                 }
                 await store.refresh(trigger: .periodic)
+                synchronizeNotifications()
             }
         }
         .alert(
@@ -847,6 +876,27 @@ struct MessagesListView: View {
             Button("Gateway Settings") { showingGatewaySetup = true }
         } message: {
             Text(store.errorMessage ?? "")
+        }
+    }
+
+    private func synchronizeNotifications() {
+        NotificationCoordinator.shared.synchronize(
+            gatewayKey: gatewayConfiguration.apiKey,
+            isForeground: scenePhase == .active,
+            activeSessionID: store.activeConversationID,
+            unreadSessionIDs: unreadSessionIDs,
+            mutedSessionIDs: mutedSessionIDs
+        )
+    }
+
+    private func openNotificationSession(_ sessionID: String) async {
+        guard gatewayConfiguration.isConfigured else { return }
+        if !store.conversations.contains(where: { $0.id == sessionID }) {
+            await store.refresh(trigger: .foreground)
+        }
+        guard store.conversations.contains(where: { $0.id == sessionID }) else { return }
+        if path.last != sessionID {
+            path.append(sessionID)
         }
     }
 

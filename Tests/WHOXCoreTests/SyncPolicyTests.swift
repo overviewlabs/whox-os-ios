@@ -98,3 +98,32 @@ import Testing
     #expect(GatewaySyncPolicy.minimumBackgroundRefreshInterval >= 15 * 60)
     #expect(GatewaySyncPolicy.backgroundTaskIdentifier == "com.whox.whoxos.session-refresh")
 }
+
+@Test func appIconBadgeCountsUnreadSessions() {
+    #expect(GatewayNotificationPolicy.badgeCount(unreadSessionIDs: []) == 0)
+    #expect(GatewayNotificationPolicy.badgeCount(unreadSessionIDs: ["one", "two"]) == 2)
+    #expect(GatewayNotificationPolicy.badgeCount(unreadSessionIDs: ["one", "one"]) == 1)
+}
+
+@Test func onlyRemoteInactiveUnmutedMessagesProduceAlerts() {
+    #expect(GatewayNotificationPolicy.shouldAlert(
+        isRemoteMessage: true,
+        isActiveSession: false,
+        isMuted: false
+    ))
+    #expect(!GatewayNotificationPolicy.shouldAlert(
+        isRemoteMessage: false,
+        isActiveSession: false,
+        isMuted: false
+    ))
+    #expect(!GatewayNotificationPolicy.shouldAlert(
+        isRemoteMessage: true,
+        isActiveSession: true,
+        isMuted: false
+    ))
+    #expect(!GatewayNotificationPolicy.shouldAlert(
+        isRemoteMessage: true,
+        isActiveSession: false,
+        isMuted: true
+    ))
+}

@@ -74,7 +74,31 @@ final class BackgroundSyncCoordinator {
         do {
             let client = try gatewayConfiguration.client()
             let store = MessageStore()
+            let hadCachedSnapshot = store.hasCachedSnapshot
+            let priorActivity = Dictionary(
+                uniqueKeysWithValues: store.conversations.map {
+                    ($0.id, $0.lastActivityAt ?? Date.distantPast)
+                }
+            )
             try await store.connect(to: client, trigger: .background)
+            let unread = store.conversations.filter(\.isUnread)
+            let changed = hadCachedSnapshot ? unread.filter {
+                !$0.isMuted &&
+                    ($0.lastActivityAt ?? Date.distantPast) > (priorActivity[$0.id] ?? Date.distantPast)
+            } : []
+            await NotificationCoordinator.shared.deliverBackgroundFallback(
+                for: changed,
+                badgeCount: GatewayNotificationPolicy.badgeCount(
+                    unreadSessionIDs: unread.map(\.id)
+                )
+            )
+            NotificationCoordinator.shared.synchronize(
+                gatewayKey: gatewayConfiguration.apiKey,
+                isForeground: false,
+                activeSessionID: nil,
+                unreadSessionIDs: unread.map(\.id),
+                mutedSessionIDs: store.conversations.filter(\.isMuted).map(\.id)
+            )
             return true
         } catch {
             return false
@@ -89,7 +113,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         BackgroundSyncCoordinator.shared.register()
+        Task {
+            await NotificationCoordinator.shared.requestAuthorizationAndRegister()
+        }
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        NotificationCoordinator.shared.didRegister(deviceToken: deviceToken)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        NotificationCoordinator.shared.didFailToRegister(error: error)
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
