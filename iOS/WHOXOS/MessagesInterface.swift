@@ -80,7 +80,7 @@ final class MessageStore {
     private(set) var loadingSessionIDs: Set<String> = []
     var errorMessage: String?
     @ObservationIgnored private var gatewayClient: HermesGatewayClient?
-    @ObservationIgnored private var activeConversationID: Conversation.ID?
+    @ObservationIgnored private(set) var activeConversationID: Conversation.ID?
     @ObservationIgnored private var syncInProgress = false
     @ObservationIgnored private var connectionGeneration = 0
     @ObservationIgnored private var loadingSessionTokens: [Conversation.ID: UUID] = [:]

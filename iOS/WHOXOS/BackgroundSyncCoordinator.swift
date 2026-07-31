@@ -77,14 +77,14 @@ final class BackgroundSyncCoordinator {
             let hadCachedSnapshot = store.hasCachedSnapshot
             let priorActivity = Dictionary(
                 uniqueKeysWithValues: store.conversations.map {
-                    ($0.id, $0.lastActivityAt ?? Date.distantPast)
+                    ($0.id, $0.activityTimestamp ?? 0)
                 }
             )
             try await store.connect(to: client, trigger: .background)
             let unread = store.conversations.filter(\.isUnread)
             let changed = hadCachedSnapshot ? unread.filter {
                 !$0.isMuted &&
-                    ($0.lastActivityAt ?? Date.distantPast) > (priorActivity[$0.id] ?? Date.distantPast)
+                    ($0.activityTimestamp ?? 0) > (priorActivity[$0.id] ?? 0)
             } : []
             await NotificationCoordinator.shared.deliverBackgroundFallback(
                 for: changed,
